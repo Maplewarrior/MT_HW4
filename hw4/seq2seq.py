@@ -255,7 +255,7 @@ The method is missing v_a for now (see appendix of paper)
 but incorporating it shouldn't change compatability with the rest.
 """
 
-class AlignmentModel(nn.Module):
+class AlignmentHelper(nn.Module):
     def __init__(self, hidden_size, hidden_align_size):
         super().__init__()
         self.Wa = nn.Linear(hidden_size, hidden_align_size)
@@ -268,10 +268,45 @@ class AlignmentModel(nn.Module):
         h_c = torch.cat((h_forward, h_backward), dim=-1) # get bidirection annotations
         e_ij = self.tanh(self.Wa(s) + self.Ua(h_c))
         return e_ij
+    
         
 
-
-A = AlignmentModel(hidden_size, hidden_align_size)
+class AlignmentModel(nn.Module):
+    def __init__(self, input_size, hidden_size, hidden_align_size):
+        super().__init__()
+        
+        self.hidden_size = hidden_size
+        self.ah = AlignmentHelper(hidden_size, hidden_align_size)
+        self.encoder = EncoderRNN(input_size, hidden_size)
+        self.decoder = AttnDecoderRNN(hidden_size, output_size)
+    
+    def forward(self, src_sent, cnt):
+        src_sent_flipped = src_sent.T
+        
+        h_i_forward = []
+        h_i_backward = []
+        
+        e_vals = []
+        
+        for i in range(cnt):
+            if len(h_i_forward) == 0:    
+                _, enc_forward_out = self.encoder.forward(src_sent[i], self.encoder.get_initial_hidden_state())
+                _, enc_backward_out = self.encoder.backward(src_sent_flipped[i], self.encoder.get_initial_hidden_state())
+                h_i_forward.append(enc_forward_out)
+                h_i_backward.append(enc_backward_out)
+                
+                e_vals.append(self.ah.forward(s, h_i_forward[i], h_i_backward[i]))
+                
+            else:
+                _, enc_forward_out = self.encoder.forward(src_sent[i], h_i_forward[i-1])
+                _, enc_backward_out = self.encoder.backward(src_sent_flipped[i], h_i_backward[i-1])
+                h_i_forward.append(enc_forward_out)
+                h_i_backward.append(enc_backward_out)
+                
+                e_vals.append(self.ah.forward(s, h_i_forward[i], h_i_backward[i]))
+            
+            
+A = AlignmentHelper(hidden_size, hidden_align_size)
 
 alp = A.forward(s0, h, h_b)
 print(alp.size())
