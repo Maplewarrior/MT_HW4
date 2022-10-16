@@ -304,7 +304,7 @@ class AlignmentModel(nn.Module):
                 s_i.append(dec_out)
                 e_vals.append(self.ah.forward(s_i[i], h_i_forward[i], h_i_backward[i]))
                 alphas.append(self.softmax(e_vals[i]))
-                context_vecs.append(alphas @ torch.cat(h_i_forward[i], h_i_backward[i], dim=-1))
+                context_vecs.append(alphas[i] @ torch.cat(h_i_forward[i], h_i_backward[i], dim=-1))
                 
                 
             else:
@@ -316,7 +316,7 @@ class AlignmentModel(nn.Module):
                 s_i.append(dec_out)
                 e_vals.append(self.ah.forward(s_i[i], h_i_forward[i], h_i_backward[i]))
                 alphas.append(self.softmax(e_vals[i]))
-                context_vecs.append(alphas @ torch.cat(h_i_forward[i], h_i_backward[i], dim=-1))
+                context_vecs.append(alphas[i] @ torch.cat(h_i_forward[i], h_i_backward[i], dim=-1))
         
         return context_vecs
                 
@@ -380,8 +380,13 @@ class AttnDecoderRNN(nn.Module):
         
         # make sure encoder output is correctly used for c_i.
         r_i = self.sigmoid(self.Wr(y) + self.Ur(hidden) + self.Cr(c_i))
+        z_i = self.sigmoid(self.Wz(y) + self.Uz(hidden) + self.Cz(c_i))
+        s_tilde = self.tanh(self.Ws(y) + self.Us(hidden) + self.Cs(c_i))
         
-        return log_softmax, hidden, attn_weights
+        s_i = (1- z_i) * hidden + z_i * s_tilde
+        return s_i
+    
+        # return log_softmax, hidden, attn_weights
 
     def get_initial_hidden_state(self):
         return torch.zeros(1, 1, self.hidden_size, device=device)
