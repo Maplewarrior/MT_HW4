@@ -250,10 +250,7 @@ s0 = Ws(h_b)
 res = (Ws(s0) + Ua(h_c))
 
 #%%
-"""
-The method is missing v_a for now (see appendix of paper)
-but incorporating it shouldn't change compatability with the rest.
-"""
+
 
 class AlignmentHelper(nn.Module):
     def __init__(self, hidden_size, hidden_align_size):
