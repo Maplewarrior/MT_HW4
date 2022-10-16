@@ -135,11 +135,16 @@ def tensors_from_pair(src_vocab, tgt_vocab, pair):
 ######################################################################
 
 class Embedder(nn.Module):
-    def __init__(self, input_size, hidden_size):
-        self.embed = nn.Embedding(self.input_size, self.hidden_size)
+    def __init__(self, hidden_size, input_size):
+        super().__init__()
+        # self.input_size = input_size
+        self.embed = nn.Embedding(hidden_size, input_size)
         
     def forward(self, x):
-        return self.embed(x)
+        out = self.embed(x)
+        # reshape to embedding dim x src_len
+        # out = out.squeeze(1)
+        return out
         
 class EncoderRNN(nn.Module):
     """the class for the enoder RNN
@@ -156,16 +161,25 @@ class EncoderRNN(nn.Module):
         "*** YOUR CODE HERE ***"
         # raise NotImplementedError
         self.input_size = input_size
-        self.embed = Embedder(self.input_size, self.hidden_size)
+        self.embed = Embedder(self.hidden_size, self.input_size)
         
         # Get weight matrices
-        self.Wh = nn.Linear(self.hidden_size, self.input_size) # W = n x m
-        self.Wz = nn.Linear(self.hidden_size, self.input_size)
-        self.Wr = nn.Linear(self.hidden_size, self.input_size)
+        self.Wh_forward = nn.Linear(self.input_size, self.hidden_size) # W = n x m
+        self.Wz_forward = nn.Linear(self.input_size, self.hidden_size)
+        self.Wr_forward = nn.Linear(self.input_size, self.hidden_size)
         
-        self.Uh = nn.linear(self.hidden_size, self.hidden_size)
-        self.Uz = nn.linear(self.hidden_size, self.hidden_size)
-        self.Ur = nn.linear(self.hidden_size, self.hidden_size)
+        self.Uh_forward = nn.Linear(self.hidden_size, self.hidden_size)
+        self.Uz_forward = nn.Linear(self.hidden_size, self.hidden_size)
+        self.Ur_forward = nn.Linear(self.hidden_size, self.hidden_size)
+        
+        # Get weight matrices for backward pass
+        self.Wh_backward = nn.Linear(self.input_size, self.hidden_size) # W = n x m
+        self.Wz_backward = nn.Linear(self.input_size, self.hidden_size)
+        self.Wr_backward = nn.Linear(self.input_size, self.hidden_size)
+        
+        self.Uh_backward = nn.Linear(self.hidden_size, self.hidden_size)
+        self.Uz_backward = nn.Linear(self.hidden_size, self.hidden_size)
+        self.Ur_backward = nn.Linear(self.hidden_size, self.hidden_size)
         
         self.tanh = nn.Tanh()
         self.sigmoid = nn.Sigmoid()
@@ -179,10 +193,24 @@ class EncoderRNN(nn.Module):
         "*** YOUR CODE HERE ***"
         x = self.embed(x)
         
-        r_i = self.sigmoid(self.Wr(x) + self.Ur(hidden))
-        z_i = self.sigmoid(self.Wz(x) + self.Uz(hidden)) # = output
+        r_i = self.sigmoid(self.Wr_forward(x) + self.Ur_forward(hidden))
+        z_i = self.sigmoid(self.Wz_forward(x) + self.Uz_forward(hidden)) # = output
         # compute hidden at i
-        h_i = self.tanh(self.Wh(x) + self.Uh(r_i * hidden)) # = hidden
+        h_i = self.tanh(self.Wh_forward(x) + self.Uh_forward(r_i * hidden)) # = hidden
+        
+        return z_i, h_i
+    
+    def backward(self, x, hidden):
+        """runs the backward pass of the encoder
+        returns the output and the hidden state
+        """
+        "*** YOUR CODE HERE ***"
+        x = self.embed(x)
+        
+        r_i = self.sigmoid(self.Wr_backward(x) + self.Ur_backward(hidden))
+        z_i = self.sigmoid(self.Wz_backward(x) + self.Uz_backward(hidden)) # = output
+        # compute hidden at i
+        h_i = self.tanh(self.Wh_backward(x) + self.Uh_backward(r_i * hidden)) # = hidden
         
         return z_i, h_i
         # return output, hidden
@@ -190,7 +218,64 @@ class EncoderRNN(nn.Module):
     def get_initial_hidden_state(self):
         return torch.zeros(1, 1, self.hidden_size, device=device)
 
+# #%%
+input_size = 620
+hidden_size = 1000
+hidden_align_size = hidden_size
+ipt = torch.ones(1, 1, dtype = int)
 
+E = EncoderRNN(input_size, hidden_size)
+
+
+out, h = E.forward(ipt, E.get_initial_hidden_state())
+
+print(out.size())
+print(h.size())
+
+out_b, h_b =  E.backward(ipt, E.get_initial_hidden_state())
+
+
+
+#%%
+h_c = torch.cat((h, h_b), dim=-1)
+Ua = nn.Linear(2*hidden_size, hidden_align_size)
+
+# print(Ua(h_c).size())
+
+Ws = nn.Linear(hidden_size, hidden_size)
+s0 = Ws(h_b)
+# print(Ws(s0).size())
+# v = nn.Linear(hidden_size)
+
+res = (Ws(s0) + Ua(h_c))
+
+#%%
+"""
+The method is missing v_a for now (see appendix of paper)
+but incorporating it shouldn't change compatability with the rest.
+"""
+
+class AlignmentModel(nn.Module):
+    def __init__(self, hidden_size, hidden_align_size):
+        super().__init__()
+        self.Wa = nn.Linear(hidden_size, hidden_align_size)
+        # self.Va = nn.Linear(hidden_align_size)
+        self.Ua = nn.Linear(2*hidden_size, hidden_align_size)
+        self.tanh = nn.Tanh()
+        self.softmax = nn.Softmax(dim=-1)
+        
+    def forward(self, s, h_forward, h_backward):
+        h_c = torch.cat((h_forward, h_backward), dim=-1) # get bidirection annotations
+        e_ij = self.tanh(self.Wa(s) + self.Ua(h_c))
+        return e_ij
+        
+
+
+A = AlignmentModel(hidden_size, hidden_align_size)
+
+alp = A.forward(s0, h, h_b)
+print(alp.size())
+#%%
 class AttnDecoderRNN(nn.Module):
     """the class for the decoder 
     """
@@ -209,9 +294,9 @@ class AttnDecoderRNN(nn.Module):
         self.softmax = nn.Softmax(dim=1) ## Check dim when rest of code is set up
         
         #### make sure W's and U's should be different from the ones in the encoder ####
-        self.Ws = nn.Linear(self.hidden_size, self.input_size) # W = n x m
-        self.Wz = nn.Linear(self.hidden_size, self.input_size)
-        self.Wr = nn.Linear(self.hidden_size, self.input_size)
+        self.Ws = nn.Linear(self.input_size, self.hidden_size) # W = n x m
+        self.Wz = nn.Linear(self.input_size, self.hidden_size)
+        self.Wr = nn.Linear(self.input_size, self.hidden_size)
         
         self.Us = nn.linear(self.hidden_size, self.hidden_size)
         self.Uz = nn.linear(self.hidden_size, self.hidden_size)
@@ -396,7 +481,7 @@ def clean(strx):
 
 
 ######################################################################
-
+#%%
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--hidden_size', default=256, type=int,
@@ -429,7 +514,6 @@ def main():
                     help='checkpoint file to start from')
 
     args = ap.parse_args()
-
     # process the training, dev, test files
 
     # Create vocab from training data, or load if checkpointed
@@ -445,8 +529,8 @@ def main():
                                            args.tgt_lang,
                                            args.train_file)
 
-    encoder = EncoderRNN(src_vocab.n_words, args.hidden_size).to(device)
-    decoder = AttnDecoderRNN(args.hidden_size, tgt_vocab.n_words, dropout_p=0.1).to(device)
+    # encoder = EncoderRNN(src_vocab.n_words, args.hidden_size).to(device)
+    # decoder = AttnDecoderRNN(args.hidden_size, tgt_vocab.n_words, dropout_p=0.1).to(device)
 
     # encoder/decoder weights are randomly initilized
     # if checkpointed, load saved weights
@@ -458,7 +542,9 @@ def main():
     train_pairs = split_lines(args.train_file)
     dev_pairs = split_lines(args.dev_file)
     test_pairs = split_lines(args.test_file)
-
+    
+    print("SIZE:", tensors_from_pair(src_vocab, tgt_vocab, random.choice(train_pairs))[0].size())
+    
     # set up optimization/loss
     params = list(encoder.parameters()) + list(decoder.parameters())  # .parameters() returns generator
     optimizer = optim.Adam(params, lr=args.initial_learning_rate)
@@ -476,6 +562,7 @@ def main():
         iter_num += 1
         training_pair = tensors_from_pair(src_vocab, tgt_vocab, random.choice(train_pairs))
         input_tensor = training_pair[0]
+        print(input_tensor)
         target_tensor = training_pair[1]
         loss = train(input_tensor, target_tensor, encoder,
                      decoder, optimizer, criterion)
