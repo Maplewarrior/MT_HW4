@@ -278,13 +278,13 @@ class AlignmentModel(nn.Module):
         self.hidden_size = hidden_size
         self.ah = AlignmentHelper(hidden_size, hidden_align_size)
         self.encoder = EncoderRNN(input_size, hidden_size)
-        self.decoder = AttnDecoderRNN(hidden_size, output_size)
+        self.decoder = AttnDecoderRNN(input_size, hidden_size, output_size)
         
         self.softmax = nn.Softmax(dim=-1)
     
     def forward(self, src_sent, y, c_prev, cnt):
-        src_sent_flipped = src_sent.T
-        
+        # src_sent_flipped = src_sent.T
+        src_sent_flipped = torch.flip(src_sent, dims=[0,1])
         h_i_forward = []
         h_i_backward = []
         
@@ -298,25 +298,37 @@ class AlignmentModel(nn.Module):
             if len(h_i_forward) == 0:    
                 _, enc_forward_out = self.encoder.forward(src_sent[i], self.encoder.get_initial_hidden_state())
                 _, enc_backward_out = self.encoder.backward(src_sent_flipped[i], self.encoder.get_initial_hidden_state())
-                _, dec_out = self.decoder.forward(y, self.decoder.get_initial_hidden_state(), c_prev)
+                dec_out = self.decoder.forward(y, self.decoder.get_initial_hidden_state(), c_prev)
                 h_i_forward.append(enc_forward_out)
                 h_i_backward.append(enc_backward_out)
+                print("forward dim\n", h_i_forward[i].size())
+                print(f'{h_i_backward[i].size()=}')
+                
                 s_i.append(dec_out)
                 e_vals.append(self.ah.forward(s_i[i], h_i_forward[i], h_i_backward[i]))
+                print("e_vals:\n", e_vals[i].size())
                 alphas.append(self.softmax(e_vals[i]))
-                context_vecs.append(alphas[i] @ torch.cat(h_i_forward[i], h_i_backward[i], dim=-1))
+                
+                print("alphas shape\n", alphas[i].size())
+                
+                
+                
+                h_new = torch.cat((h_i_forward[i], h_i_backward[i]), dim=1)
+                
+                print("h_new", h_new.size())
+                context_vecs.append(alphas[i] @ torch.cat((h_i_forward[i], h_i_backward[i]), dim=1))
                 
                 
             else:
                 _, enc_forward_out = self.encoder.forward(src_sent[i], h_i_forward[i-1])
                 _, enc_backward_out = self.encoder.backward(src_sent_flipped[i], h_i_backward[i-1])
-                _, dec_out = self.decoder.forward(y, s_i[i-1], context_vecs[i-1])
+                dec_out = self.decoder.forward(y, s_i[i-1], context_vecs[i-1])
                 h_i_forward.append(enc_forward_out)
                 h_i_backward.append(enc_backward_out)
                 s_i.append(dec_out)
                 e_vals.append(self.ah.forward(s_i[i], h_i_forward[i], h_i_backward[i]))
                 alphas.append(self.softmax(e_vals[i]))
-                context_vecs.append(alphas[i] @ torch.cat(h_i_forward[i], h_i_backward[i], dim=-1))
+                context_vecs.append(alphas[i] @ torch.cat((h_i_forward[i], h_i_backward[i]), dim=-1))
         
         return context_vecs
                 
@@ -330,9 +342,11 @@ print(alp.size())
 class AttnDecoderRNN(nn.Module):
     """the class for the decoder 
     """
-    def __init__(self, hidden_size, output_size, dropout=0.1, max_length=MAX_LENGTH):
+    def __init__(self, input_size, hidden_size, output_size, dropout=0.1, max_length=MAX_LENGTH):
         super(AttnDecoderRNN, self).__init__()
         self.hidden_size = hidden_size
+        self.dropout = dropout
+        self.input_size = input_size
         self.output_size = output_size
         self.max_length = max_length
         self.dropout = nn.Dropout(self.dropout)
@@ -345,17 +359,17 @@ class AttnDecoderRNN(nn.Module):
         self.softmax = nn.Softmax(dim=1) ## Check dim when rest of code is set up
         
         #### make sure W's and U's should be different from the ones in the encoder ####
-        self.Ws = nn.Linear(self.input_size, self.hidden_size) # W = n x m
-        self.Wz = nn.Linear(self.input_size, self.hidden_size)
-        self.Wr = nn.Linear(self.input_size, self.hidden_size)
+        self.Ws = nn.Linear(self.output_size, self.hidden_size) # W = n x m
+        self.Wz = nn.Linear(self.output_size, self.hidden_size)
+        self.Wr = nn.Linear(self.output_size, self.hidden_size)
         
-        self.Us = nn.linear(self.hidden_size, self.hidden_size)
-        self.Uz = nn.linear(self.hidden_size, self.hidden_size)
-        self.Ur = nn.linear(self.hidden_size, self.hidden_size)
+        self.Us = nn.Linear(self.hidden_size, self.hidden_size)
+        self.Uz = nn.Linear(self.hidden_size, self.hidden_size)
+        self.Ur = nn.Linear(self.hidden_size, self.hidden_size)
         
-        self.Cs = nn.Linear(self.hidden_size, 2*self.hidden_size)
-        self.Cz = nn.Linear(self.hidden_size, 2*self.hidden_size)
-        self.Cr = nn.Linear(self.hidden_size, 2*self.hidden_size)
+        self.Cs = nn.Linear(2*self.hidden_size, self.hidden_size)
+        self.Cz = nn.Linear(2*self.hidden_size, self.hidden_size)
+        self.Cr = nn.Linear(2*self.hidden_size, self.hidden_size)
         
         self.tanh = nn.Tanh()
         self.sigmoid = nn.Sigmoid()
@@ -364,9 +378,6 @@ class AttnDecoderRNN(nn.Module):
         self.out = nn.Linear(self.hidden_size, self.output_size)
         
         
-        
-        
-
     def forward(self, input, hidden, c_i):
         """runs the forward pass of the decoder
         returns the log_softmax, hidden state, and attn_weights
@@ -377,20 +388,34 @@ class AttnDecoderRNN(nn.Module):
         "*** YOUR CODE HERE ***"
         # raise NotImplementedError
         y = self.embed(input)
-        
+        print("y shape:", y.size())
         # make sure encoder output is correctly used for c_i.
+        
+        
+        r1 = self.Wr(y) + self.Ur(hidden)
+        print("r1", r1.size())
+        
+        r2 = self.Cr(c_i)
+        print("r2", r2.size())
         r_i = self.sigmoid(self.Wr(y) + self.Ur(hidden) + self.Cr(c_i))
         z_i = self.sigmoid(self.Wz(y) + self.Uz(hidden) + self.Cz(c_i))
         s_tilde = self.tanh(self.Ws(y) + self.Us(hidden) + self.Cs(c_i))
         
         s_i = (1- z_i) * hidden + z_i * s_tilde
         return s_i
-    
         # return log_softmax, hidden, attn_weights
 
     def get_initial_hidden_state(self):
         return torch.zeros(1, 1, self.hidden_size, device=device)
 
+#%%
+input_size = 620
+output_size = 650
+hidden_size = 1000
+AM = AlignmentModel(input_size, output_size, hidden_size)
+
+AM.forward(torch.ones((10,1), dtype=int), torch.ones((10,1), dtype=int), torch.zeros((hidden_size, 2*hidden_size, )), 1)
+#%%
 
 """
 implement generic RNN class that combines the two methods above and feed that to train?
