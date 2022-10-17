@@ -302,6 +302,7 @@ class AlignmentModel(nn.Module):
                 print(f'{h_i_backward[i].size()=}')
                 
                 s_i.append(dec_out)
+                print("s_i", s_i[i].size())
                 e_vals.append(self.ah.forward(s_i[i], h_i_forward[i], h_i_backward[i]))
                 print("e_vals:\n", e_vals[i].size())
                 alphas.append(self.softmax(e_vals[i]))
