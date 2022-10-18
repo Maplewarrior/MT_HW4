@@ -1,92 +1,11 @@
 import torch
 import torch.nn as nn
+from seq2seq import Embedder, EncoderRNN
 
 device = 'cpu'
 MAX_LENGTH = 15
 
-class Embedder(nn.Module):
-    def __init__(self, hidden_size, input_size):
-        super().__init__()
-        # self.input_size = input_size
-        self.embed = nn.Embedding(hidden_size, input_size)
-        
-    def forward(self, x):
-        out = self.embed(x)
-        # reshape to embedding dim x src_len
-        # out = out.squeeze(1)
-        return out
 
-class EncoderRNN(nn.Module):
-    """the class for the enoder RNN
-    """
-    def __init__(self, input_size, hidden_size):
-        super(EncoderRNN, self).__init__()
-        self.hidden_size = hidden_size
-        """Initilize a word embedding and bi-directional LSTM encoder
-        For this assignment, you should *NOT* use nn.LSTM. 
-        Instead, you should implement the equations yourself.
-        See, for example, https://en.wikipedia.org/wiki/Long_short-term_memory#LSTM_with_a_forget_gate
-        You should make your LSTM modular and re-use it in the Decoder.
-        """
-        "*** YOUR CODE HERE ***"
-        # raise NotImplementedError
-        self.input_size = input_size
-        self.embed = Embedder(self.hidden_size, self.input_size)
-        
-        # Get weight matrices
-        self.Wh_forward = nn.Linear(self.input_size, self.hidden_size) # W = n x m
-        self.Wz_forward = nn.Linear(self.input_size, self.hidden_size)
-        self.Wr_forward = nn.Linear(self.input_size, self.hidden_size)
-        
-        self.Uh_forward = nn.Linear(self.hidden_size, self.hidden_size)
-        self.Uz_forward = nn.Linear(self.hidden_size, self.hidden_size)
-        self.Ur_forward = nn.Linear(self.hidden_size, self.hidden_size)
-        
-        # Get weight matrices for backward pass
-        self.Wh_backward = nn.Linear(self.input_size, self.hidden_size) # W = n x m
-        self.Wz_backward = nn.Linear(self.input_size, self.hidden_size)
-        self.Wr_backward = nn.Linear(self.input_size, self.hidden_size)
-        
-        self.Uh_backward = nn.Linear(self.hidden_size, self.hidden_size)
-        self.Uz_backward = nn.Linear(self.hidden_size, self.hidden_size)
-        self.Ur_backward = nn.Linear(self.hidden_size, self.hidden_size)
-        
-        self.tanh = nn.Tanh()
-        self.sigmoid = nn.Sigmoid()
-        # return output, hidden
-
-
-    def forward(self, x, hidden):
-        """runs the forward pass of the encoder
-        returns the output and the hidden state
-        """
-        "*** YOUR CODE HERE ***"
-        x = self.embed(x)
-        
-        r_i = self.sigmoid(self.Wr_forward(x) + self.Ur_forward(hidden))
-        z_i = self.sigmoid(self.Wz_forward(x) + self.Uz_forward(hidden)) # = output
-        # compute hidden at i
-        h_i = self.tanh(self.Wh_forward(x) + self.Uh_forward(r_i * hidden)) # = hidden
-        
-        return z_i, h_i
-    
-    def backward(self, x, hidden):
-        """runs the backward pass of the encoder
-        returns the output and the hidden state
-        """
-        "*** YOUR CODE HERE ***"
-        x = self.embed(x)
-        
-        r_i = self.sigmoid(self.Wr_backward(x) + self.Ur_backward(hidden))
-        z_i = self.sigmoid(self.Wz_backward(x) + self.Uz_backward(hidden)) # = output
-        # compute hidden at i
-        h_i = self.tanh(self.Wh_backward(x) + self.Uh_backward(r_i * hidden)) # = hidden
-        
-        return z_i, h_i
-        # return output, hidden
-
-    def get_initial_hidden_state(self):
-        return torch.zeros(1, 1, self.hidden_size, device=device)
 
 class AlignmentHelper(nn.Module):
     def __init__(self, hidden_size, hidden_align_size):
@@ -103,8 +22,6 @@ class AlignmentHelper(nn.Module):
         
         step1 = self.tanh(self.Wa(s) + self.Ua(h_c)).squeeze(0).T
         step2 = self.Va.weight.T
-        
-        
         
         e_ij = step2 @ step1
         
@@ -259,7 +176,7 @@ z_i_forward, h_i_forward = E.forward(ipt, h0)
 print("encoder forward output:\n", z_i_forward.shape, h_i_forward.shape)
 
 z_i_backward, h_i_backward = E.backward(ipt, h0)
-print("encoder backward output:\n", z_i_backward.shape, h_i_backward.shape)
+print("encoder backward output\n", z_i_backward.shape, h_i_backward.shape)
 
 e_ij = AH.forward(s0, h_i_forward, h_i_backward)
 print("e_ij:\n", e_ij)
