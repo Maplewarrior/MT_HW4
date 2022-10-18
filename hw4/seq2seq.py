@@ -196,9 +196,9 @@ class EncoderRNN(nn.Module):
         r_i = self.sigmoid(self.Wr_forward(x) + self.Ur_forward(hidden))
         z_i = self.sigmoid(self.Wz_forward(x) + self.Uz_forward(hidden)) # = output
         # compute hidden at i
-        h_i = self.tanh(self.Wh_forward(x) + self.Uh_forward(r_i * hidden)) # = hidden
-        
-        return z_i, h_i
+        h_i_bar = self.tanh(self.Wh_forward(x) + self.Uh_forward(r_i * hidden)) # = hidden
+        h_i = (1- z_i) * hidden + z_i * h_i_bar
+        return h_i
     
     def backward(self, x, hidden):
         """runs the backward pass of the encoder
@@ -210,9 +210,10 @@ class EncoderRNN(nn.Module):
         r_i = self.sigmoid(self.Wr_backward(x) + self.Ur_backward(hidden))
         z_i = self.sigmoid(self.Wz_backward(x) + self.Uz_backward(hidden)) # = output
         # compute hidden at i
-        h_i = self.tanh(self.Wh_backward(x) + self.Uh_backward(r_i * hidden)) # = hidden
+        h_i_bar = self.tanh(self.Wh_backward(x) + self.Uh_backward(r_i * hidden)) # = hidden
         
-        return z_i, h_i
+        h_i = (1- z_i) * hidden + z_i * h_i_bar
+        return h_i
         # return output, hidden
 
     def get_initial_hidden_state(self):
@@ -306,11 +307,10 @@ class AttnDecoderRNN(nn.Module):
     def __init__(self, input_size, hidden_size, output_size, dropout=0.1, max_length=MAX_LENGTH):
         super(AttnDecoderRNN, self).__init__()
         self.hidden_size = hidden_size
-        self.dropout = dropout
         self.input_size = input_size
         self.output_size = output_size
         self.max_length = max_length
-        self.dropout = nn.Dropout(self.dropout)
+        self.dropout = nn.Dropout(dropout)
         
         """Initilize your word embedding, decoder LSTM, and weights needed for your attention here
         """
@@ -349,15 +349,14 @@ class AttnDecoderRNN(nn.Module):
         "*** YOUR CODE HERE ***"
         # raise NotImplementedError
         y = self.embed(input)
-        print("y shape:", y.size())
-        # make sure encoder output is correctly used for c_i.
+        y = self.dropout(y)
         
         
-        r1 = self.Wr(y) + self.Ur(hidden)
-        print("r1", r1.size())
         
-        r2 = self.Cr(c_i)
-        print("r2", r2.size())
+        
+        # r1 = self.Wr(y) + self.Ur(hidden)
+        # r2 = self.Cr(c_i)
+        
         r_i = self.sigmoid(self.Wr(y) + self.Ur(hidden) + self.Cr(c_i))
         z_i = self.sigmoid(self.Wz(y) + self.Uz(hidden) + self.Cz(c_i))
         s_tilde = self.tanh(self.Ws(y) + self.Us(hidden) + self.Cs(c_i))
@@ -369,6 +368,8 @@ class AttnDecoderRNN(nn.Module):
     def get_initial_hidden_state(self):
         return torch.zeros(1, 1, self.hidden_size, device=device)
 
+
+# def Align(e_ij, hi)
 #%%
 input_size = 620
 output_size = 650
@@ -383,13 +384,28 @@ AH = AlignmentHelper(hidden_size, hidden_align_size)
 D = AttnDecoderRNN(input_size, hidden_size, output_size)
 
 
-_, h_forward = E.forward(ipt, E.get_initial_hidden_state())
-_, h_backward = E.backward(ipt, E.get_initial_hidden_state())
-s0 = D.get_initial_hidden_state()
+
+enc_h_states_f = torch.zeros(MAX_LENGTH, hidden_size)
+enc_h_states_b = torch.zeros(MAX_LENGTH, hidden_size)
+
+for i in range(len(ipt)):
+    h_forward = E.get_initial_hidden_state()
+    h_backward = E.get_initial_hidden_state()
+    
+    h_backward = E.backward(ipt[0], h_backward)
+    h_forward = E.forward(ipt[0], h_forward)
+    
+    enc_h_states_f[i] = h_forward[0,0]
+    enc_h_states_b[i] = h_backward[0,0]
+    
+
+#%%
 
 
-e_ij = AH.forward(s0, h_forward, h_backward)
-print(e_ij.size())
+    
+
+
+
 
 # AM = AlignmentModel(input_size, output_size, hidden_size)
 
