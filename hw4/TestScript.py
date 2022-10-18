@@ -96,7 +96,6 @@ class AlignmentHelper(nn.Module):
         self.Ua = nn.Linear(2*hidden_size, hidden_align_size)
         self.tanh = nn.Tanh()
         self.softmax = nn.Softmax(dim=-1)
-        print(self.Va.weight.size())
         
     def forward(self, s, h_forward, h_backward):
         h_c = torch.cat((h_forward, h_backward), dim=-1) # get bidirection annotations
@@ -104,6 +103,8 @@ class AlignmentHelper(nn.Module):
         
         step1 = self.tanh(self.Wa(s) + self.Ua(h_c)).squeeze(0).T
         step2 = self.Va.weight.T
+        
+        
         
         e_ij = step2 @ step1
         
@@ -220,15 +221,9 @@ class AttnDecoderRNN(nn.Module):
         "*** YOUR CODE HERE ***"
         # raise NotImplementedError
         y = self.embed(input)
-        print("y shape:", y.size())
+        
         # make sure encoder output is correctly used for c_i.
         
-        
-        r1 = self.Wr(y) + self.Ur(hidden)
-        print("r1", r1.size())
-        
-        r2 = self.Cr(c_i)
-        print("r2", r2.size())
         r_i = self.sigmoid(self.Wr(y) + self.Ur(hidden) + self.Cr(c_i))
         z_i = self.sigmoid(self.Wz(y) + self.Uz(hidden) + self.Cz(c_i))
         s_tilde = self.tanh(self.Ws(y) + self.Us(hidden) + self.Cs(c_i))
@@ -256,20 +251,23 @@ trg = trg.unsqueeze(-1)
 
 
 
+
 h0 = E.get_initial_hidden_state()
 s0 = h0
 
 z_i_forward, h_i_forward = E.forward(ipt, h0)
-print("encoder forward output\n", z_i_forward.shape, h_i_forward.shape)
+print("encoder forward output:\n", z_i_forward.shape, h_i_forward.shape)
 
 z_i_backward, h_i_backward = E.backward(ipt, h0)
-print("encoder backward output\n", z_i_backward.shape, h_i_backward.shape)
+print("encoder backward output:\n", z_i_backward.shape, h_i_backward.shape)
 
 e_ij = AH.forward(s0, h_i_forward, h_i_backward)
-print(e_ij)
+print("e_ij:\n", e_ij)
 
 
 AM = AlignmentModel(input_size, output_size, hidden_size, hidden_align_size)
 
 c_i = AM.forward(ipt, trg, 1)
+
+
 # print(c_i[0].size())
