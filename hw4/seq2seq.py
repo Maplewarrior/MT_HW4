@@ -256,14 +256,14 @@ class AlignmentHelper(nn.Module):
     def __init__(self, hidden_size, hidden_align_size):
         super().__init__()
         self.Wa = nn.Linear(hidden_size, hidden_align_size)
-        # self.Va = nn.Linear(hidden_align_size)
+        self.Va = nn.Linear(hidden_align_size, 1)
         self.Ua = nn.Linear(2*hidden_size, hidden_align_size)
         self.tanh = nn.Tanh()
         self.softmax = nn.Softmax(dim=-1)
         
     def forward(self, s, h_forward, h_backward):
-        h_c = torch.cat((h_forward, h_backward), dim=-1) # get bidirection annotations
-        e_ij = self.tanh(self.Wa(s) + self.Ua(h_c))
+        h_j = torch.cat((h_forward, h_backward), dim=-1) # get bidirection annotations
+        e_ij = self.Va.weight.T @ self.tanh(self.Wa(s) + self.Ua(h_j))
         return e_ij
     
         
