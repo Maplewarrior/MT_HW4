@@ -218,38 +218,6 @@ class EncoderRNN(nn.Module):
     def get_initial_hidden_state(self):
         return torch.zeros(1, 1, self.hidden_size, device=device)
 
-# #%%
-input_size = 620
-hidden_size = 1000
-hidden_align_size = hidden_size
-ipt = torch.ones(1, 1, dtype = int)
-
-E = EncoderRNN(input_size, hidden_size)
-
-
-out, h = E.forward(ipt, E.get_initial_hidden_state())
-
-print(out.size())
-print(h.size())
-
-out_b, h_b =  E.backward(ipt, E.get_initial_hidden_state())
-
-
-
-#%%
-h_c = torch.cat((h, h_b), dim=-1)
-Ua = nn.Linear(2*hidden_size, hidden_align_size)
-
-# print(Ua(h_c).size())
-
-Ws = nn.Linear(hidden_size, hidden_size)
-s0 = Ws(h_b)
-# print(Ws(s0).size())
-# v = nn.Linear(hidden_size)
-
-res = (Ws(s0) + Ua(h_c))
-
-#%%
 
 
 class AlignmentHelper(nn.Module):
@@ -269,7 +237,7 @@ class AlignmentHelper(nn.Module):
         
 
 class AlignmentModel(nn.Module):
-    def __init__(self, input_size, output_size, hidden_size, hidden_align_size=hidden_size):
+    def __init__(self, input_size, output_size, hidden_size, hidden_align_size):
         super().__init__()
         
         self.hidden_size = hidden_size
@@ -332,11 +300,6 @@ class AlignmentModel(nn.Module):
                 
             
             
-A = AlignmentHelper(hidden_size, hidden_align_size)
-
-alp = A.forward(s0, h, h_b)
-print(alp.size())
-#%%
 class AttnDecoderRNN(nn.Module):
     """the class for the decoder 
     """
@@ -410,9 +373,27 @@ class AttnDecoderRNN(nn.Module):
 input_size = 620
 output_size = 650
 hidden_size = 1000
-AM = AlignmentModel(input_size, output_size, hidden_size)
+hidden_align_size = hidden_size
 
-AM.forward(torch.ones((10,1), dtype=int), torch.ones((10,1), dtype=int), torch.zeros((hidden_size, 2*hidden_size, )), 1)
+ipt = torch.tensor((1,2,3), dtype=int)
+ipt = ipt.unsqueeze(1)
+
+E = EncoderRNN(input_size, hidden_size)
+AH = AlignmentHelper(hidden_size, hidden_align_size)
+D = AttnDecoderRNN(input_size, hidden_size, output_size)
+
+
+_, h_forward = E.forward(ipt, E.get_initial_hidden_state())
+_, h_backward = E.backward(ipt, E.get_initial_hidden_state())
+s0 = D.get_initial_hidden_state()
+
+
+e_ij = AH.forward(s0, h_forward, h_backward)
+print(e_ij.size())
+
+# AM = AlignmentModel(input_size, output_size, hidden_size)
+
+# AM.forward(torch.ones((10,1), dtype=int), torch.ones((10,1), dtype=int), torch.zeros((hidden_size, 2*hidden_size, )), 1)
 #%%
 
 """
