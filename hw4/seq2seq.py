@@ -223,17 +223,10 @@ class AlignmentHelper(nn.Module):
         self.softmax = nn.Softmax(dim=-1)
         
     def forward(self, s, h_forward, h_backward):
-
         h_j = torch.cat((h_forward, h_backward), dim=-1) # get bidirection annotations
-        print(f'{h_j.size()=}')
-        print(f'{s.size()=}')
         step1 = (self.tanh(self.Wa(s) + self.Ua(h_j))).squeeze(0)
-        print(f'{step1.size()=}')
-        print(f'{self.Va.weight.size()=}')
-        
         e_ij = self.Va(step1)
-        print(f'{e_ij.size()=}')
-        
+
         return e_ij            
 class AttnDecoderRNN(nn.Module):
     """the class for the decoder 
