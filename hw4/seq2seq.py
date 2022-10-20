@@ -223,12 +223,11 @@ class AlignmentHelper(nn.Module):
         self.softmax = nn.Softmax(dim=-1)
         
     def forward(self, s, h_forward, h_backward):
-        
+
         h_j = torch.cat((h_forward, h_backward), dim=-1) # get bidirection annotations
         
         step1 = (self.tanh(self.Wa(s) + self.Ua(h_j))).squeeze(0).T
-        step1 = step1.squeeze(1)
-       
+        
         e_ij = self.Va.weight @ step1
         
         return e_ij            
@@ -302,10 +301,15 @@ class AttnDecoderRNN(nn.Module):
             # softmax of a single value is 1 :)
             c_i = 1 * encoder_out
             attention = None
-            e_vals = [e_ij]
+            
+            val = e_ij.item()
+            e_vals = [val]
         else:
-            e_vals.append(e_ij[0])
-            e_t = torch.tensor(e_vals)
+
+            val = e_ij.item()
+            e_vals.append(val)
+
+            e_t = torch.tensor(tuple(e_vals))
             attention = self.softmax(e_t)
             c_i = attention[-1] * encoder_out
         
@@ -313,16 +317,20 @@ class AttnDecoderRNN(nn.Module):
         z_i = self.sigmoid(self.Wz(y) + self.Uz(hidden) + self.Cz(c_i))
         s_tilde = self.tanh(self.Ws(y) + self.Us(r_i * hidden) + self.Cs(c_i))
         s_i = (1- z_i) * hidden + z_i * s_tilde
+
         
         t_tilde = self.Uo(hidden) + self.Vo(y) + self.Co(c_i)
         
-        t_i = torch.zeros(self.max_length, self.maxout)
-        for i in range(self.max_length):
-            for j in range(self.maxout):
-                val = max(t_tilde[i][0][2*j-1], t_tilde[i][0][2*j])
-                t_i[i][j] = val
+        t_i = torch.zeros(1, self.maxout)
+    
+        for j in range(self.maxout):
+            val = max(t_tilde[c_idx][0][2*j-1], t_tilde[c_idx][0][2*j])
+            t_i[0][j] = val
         
-        output = torch.exp(y @ self.Wo.weight @ t_i.T)
+        
+        
+        output = torch.exp(y.T * self.Wo.weight @ t_i.T).T
+        output = F.log_softmax(output, dim=1)
         
         
         return output, s_i, attention, e_vals
@@ -370,7 +378,7 @@ def train(input_tensor, target_tensor, encoder, decoder, optimizer, criterion, m
     e_vals = []
 
     for di in range(len(target_tensor)):
-        d_out, decoder_hidden, attention, e_vals = decoder(target_tensor[di], decoder_hidden, encoder_hiddens_f, encoder_hiddens_b, c_idx=di)
+        d_out, decoder_hidden, attention, e_vals = decoder(target_tensor[di], decoder_hidden, encoder_hiddens_f, encoder_hiddens_b,e_vals, c_idx=di)
         loss += criterion(d_out, target_tensor[di])
         if target_tensor[di] == EOS_token:
             break
@@ -396,25 +404,30 @@ def translate(encoder, decoder, sentence, src_vocab, tgt_vocab, max_length=MAX_L
     with torch.no_grad():
         input_tensor = tensor_from_sentence(src_vocab, sentence)
         input_length = input_tensor.size()[0]
-        encoder_hidden = encoder.get_initial_hidden_state()
+        encoder_hidden_f = encoder.get_initial_hidden_state()
+        encoder_hidden_b = encoder.get_initial_hidden_state()
 
         encoder_outputs = torch.zeros(max_length, encoder.hidden_size, device=device)
-
+        
+        input_flipped = torch.flip(input_tensor, dims=[0,1])
         for ei in range(input_length):
-            encoder_output, encoder_hidden = encoder(input_tensor[ei],
-                                                     encoder_hidden)
-            encoder_outputs[ei] += encoder_output[0, 0]
+            encoder_hidden_f, encoder_hidden_b = encoder(input_tensor[ei],input_flipped[ei],
+                                                     encoder_hidden_f,
+                                                     encoder_hidden_b)
+            
+            # encoder_outputs[ei] += encoder_output[0, 0]
 
         decoder_input = torch.tensor([[SOS_index]], device=device)
 
-        decoder_hidden = encoder_hidden
+        decoder_hidden = decoder.get_initial_hidden_state()
 
         decoded_words = []
         decoder_attentions = torch.zeros(max_length, max_length)
-
+        
+        e_vals = []
         for di in range(max_length):
-            decoder_output, decoder_hidden, decoder_attention = decoder(
-                decoder_input, decoder_hidden, encoder_outputs)
+            decoder_output, decoder_hidden, decoder_attention, e_vals = decoder(
+                decoder_input, decoder_hidden, encoder_outputs, e_vals)
             decoder_attentions[di] = decoder_attention.data
             topv, topi = decoder_output.data.topk(1)
             if topi.item() == EOS_index:
@@ -493,7 +506,7 @@ def main():
                     help='hidden size of encoder/decoder, also word vector size')
     ap.add_argument('--n_iters', default=100000, type=int,
                     help='total number of examples to train on')
-    ap.add_argument('--print_every', default=5000, type=int,
+    ap.add_argument('--print_every', default=10, type=int,
                     help='print loss info every this many training examples')
     ap.add_argument('--checkpoint_every', default=10000, type=int,
                     help='write out checkpoint every this many training examples')
