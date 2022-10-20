@@ -145,8 +145,8 @@ class Embedder(nn.Module):
         # reshape to embedding dim x src_len
         # out = out.squeeze(1)
         return out
-
-class LSTMCell(nn.Module):
+        
+class Cell(nn.Module):
     def __init__(self, input_size, hidden_size):
         super().__init__()
         self.input_size = input_size
@@ -155,76 +155,53 @@ class LSTMCell(nn.Module):
         self.Wh = nn.Linear(self.input_size, self.hidden_size) # W = n x m
         self.Wz = nn.Linear(self.input_size, self.hidden_size)
         self.Wr = nn.Linear(self.input_size, self.hidden_size)
-        self.Wo = nn.Linear(self.input_size, self.hidden_size)
-        
+
         self.Uh = nn.Linear(self.hidden_size, self.hidden_size)
         self.Uz = nn.Linear(self.hidden_size, self.hidden_size)
         self.Ur = nn.Linear(self.hidden_size, self.hidden_size)
-        self.Uo = nn.Linear(self.hidden_size, self.hidden_size)
-        
+
         self.tanh = nn.Tanh()
         self.sigmoid = nn.Sigmoid()
     
-    def forward(self, x, hidden, cell):
+    def forward(self, x, hidden):
         r_i = self.sigmoid(self.Wr(x) + self.Ur(hidden))
-        z_i = self.sigmoid(self.Wz(x) + self.Uz(hidden))
-        o_i = self.sigmoid(self.Wo(x) + self.Uo(hidden))
-        
-        c_tilde = self.tanh(self.Wh(x) + self.Uh(r_i * hidden))
-        c_i = r_i * cell + z_i * c_tilde # cell state
-        
-        # h_i = (1- z_i) * hidden + z_i * h_i_bar
-        h_i = o_i * self.tanh(c_i) # hidden state
-        
-        return c_i, h_i
+        z_i = self.sigmoid(self.Wz(x) + self.Uz(hidden))        
+        h_i_bar = self.tanh(self.Wr(x) + self.Uh(r_i * hidden)) # = hidden
+        h_i = (1- z_i) * hidden + z_i * h_i_bar
 
-        
-        
+        return h_i
 class EncoderRNN(nn.Module):
-    def __init__(self, input_size, hidden_size, max_length=MAX_LENGTH):
-        super().__init__()
-        self.input_size = input_size
+    """the class for the enoder RNN
+    """
+    def __init__(self, input_size, hidden_size):
+        super(EncoderRNN, self).__init__()
         self.hidden_size = hidden_size
-        self.embed = Embedder(hidden_size, input_size)
-        self.LSTMCell_f = LSTMCell(input_size, hidden_size) # forward sentence
-        self.LSTMCell_b = LSTMCell(input_size, hidden_size) # backward sentence
+        """Initilize a word embedding and bi-directional LSTM encoder
+        For this assignment, you should *NOT* use nn.LSTM. 
+        Instead, you should implement the equations yourself.
+        See, for example, https://en.wikipedia.org/wiki/Long_short-term_memory#LSTM_with_a_forget_gate
+        You should make your LSTM modular and re-use it in the Decoder.
+        """
+        "*** YOUR CODE HERE ***"
+        # raise NotImplementedError
+        self.input_size = input_size
+        self.embed = Embedder(self.hidden_size, self.input_size)
+        self.hidden_size = hidden_size
+        
+        self.Cell_f = Cell(self.input_size, self.hidden_size) # forward sentence
+        self.Cell_b = Cell(self.input_size, self.hidden_size) # backward sentence
         
         
-    def forward(self, x, x_flipped, hidden, cell):
-        
+    def forward(self, x, x_flipped, hidden_f, hidden_b):
         x = self.embed(x)
         x_flipped = self.embed(x_flipped)
+        h_i_f = self.Cell_f(x, hidden_f)
+        h_i_b = self.Cell_b(x_flipped, hidden_b)
         
-        c_i_forward, h_i_forward = self.LSTMCell_f(x, hidden, cell)
-        c_i_backward, h_i_backward = self.LSTMCell_b(x_flipped, hidden, cell)
-        
-        return c_i_forward, h_i_forward, c_i_backward, h_i_backward
-        
-
+        return h_i_f, h_i_b
+    
     def get_initial_hidden_state(self):
         return torch.zeros(1, 1, self.hidden_size, device=device)
-    
-    
-    
-        
-
-input_size = 620
-output_size = 650
-hidden_size = 1000
-hidden_align_size = hidden_size
-
-ipt = torch.ones(15, 1, dtype=int)
-
-trg = torch.ones(15, 1, dtype=int)
-
-E = EncoderRNN(input_size, hidden_size)
-
-c_i, h_i, c_i_b, h_i_b = E.forward(ipt[0],ipt[-1], E.get_initial_hidden_state(), E.get_initial_hidden_state())
-
-
-    
-
-
 
 class AlignmentHelper(nn.Module):
     def __init__(self, hidden_size, hidden_align_size):
@@ -240,15 +217,11 @@ class AlignmentHelper(nn.Module):
         h_j = torch.cat((h_forward, h_backward), dim=-1) # get bidirection annotations
         
         step1 = (self.tanh(self.Wa(s) + self.Ua(h_j))).squeeze(0).T
+        step1 = step1.squeeze(1)
        
         e_ij = self.Va.weight @ step1
         
-        return e_ij
-    
-    
-                
-            
-            
+        return e_ij            
 class AttnDecoderRNN(nn.Module):
     """the class for the decoder 
     """
@@ -300,7 +273,7 @@ class AttnDecoderRNN(nn.Module):
         
         
         
-    def forward(self, input, hidden, enc_forward_out, enc_backward_out, e_vals=None, c_idx=0):
+    def forward(self, input, hidden, h_i_forwards, h_i_backwards, e_vals=[], c_idx=0):
         """runs the forward pass of the decoder
         returns the log_softmax, hidden state, and attn_weights
         
@@ -313,32 +286,24 @@ class AttnDecoderRNN(nn.Module):
         y = self.embed(input)
         y = self.dropout(y)
         
-        encoder_output = torch.zeros(2, self.max_length, 1, 1, self.hidden_size)
-        encoder_output[0] = enc_forward_out
-        encoder_output[1] = enc_forward_out
         
-        e_ij = self.AlignHelper.forward(hidden, encoder_output[0][c_idx], encoder_output[1][c_idx])
+        encoder_hiddens = torch.zeros(2, self.max_length, 1, self.hidden_size)
+        encoder_hiddens[0] = h_i_forwards
+        encoder_hiddens[1] = h_i_backwards
         
+        e_ij = self.AlignHelper.forward(hidden, encoder_hiddens[0][c_idx], encoder_hiddens[1][c_idx])
         
-        encoder_out = torch.cat((enc_forward_out, enc_backward_out), dim=-1)
-        if e_vals is None:
+        encoder_out = torch.cat((h_i_forwards, h_i_backwards), dim=-1)
+        if len(e_vals) == 0:
             # softmax of a single value is 1 :)
             c_i = 1 * encoder_out
-        
-        
-        
+            attention = None
+            e_vals = [e_ij]
         else:
             e_vals.append(e_ij[0])
             e_t = torch.tensor(e_vals)
             attention = self.softmax(e_t)
             c_i = attention[-1] * encoder_out
-        
-        print("c_i!!!", c_i.size())
-        # r1 = self.Wr(y) + self.Ur(hidden)
-        # r2 = self.Cr(c_i)
-        
-        # print(self.Cr(c_i))
-        
         
         r_i = self.sigmoid(self.Wr(y) + self.Ur(hidden) ) #+ self.Cr(c_i))
         z_i = self.sigmoid(self.Wz(y) + self.Uz(hidden) + self.Cz(c_i))
@@ -346,120 +311,67 @@ class AttnDecoderRNN(nn.Module):
         s_i = (1- z_i) * hidden + z_i * s_tilde
         
         
+        
         t_tilde = self.Uo(hidden) + self.Vo(y) + self.Co(c_i)
-        print("t_tildeee", t_tilde.size())
-        t_i = torch.max(t_tilde, dim=0)
-        
-        # print("t_i", t_i.shape)
-        output = torch.exp(y.T @ self.Wo.weight * t_i)
         
         
-        return output, s_i, attention
+        t_i = torch.zeros(self.max_length, self.maxout)
+        for i in range(self.max_length):
+            for j in range(self.maxout):
+                val = max(t_tilde[i][0][2*j-1], t_tilde[i][0][2*j])
+                t_i[i][j] = val
+        
+        output = torch.exp(y @ self.Wo.weight @ t_i.T)
+        
+        
+        return output, s_i, attention, e_vals
         # return log_softmax, hidden, attn_weights
 
     def get_initial_hidden_state(self):
         return torch.zeros(1, 1, self.hidden_size, device=device)
 
 
-# def Align(e_ij, hi)
-
-#%%
-input_size = 620
-output_size = 650
-hidden_size = 1000
-hidden_align_size = hidden_size
-
-ipt = torch.ones(15, 1, dtype=int)
-
-trg = torch.ones(15, 1, dtype=int)
-
-E = EncoderRNN(input_size, hidden_size)
-AH = AlignmentHelper(hidden_size, hidden_align_size)
-D = AttnDecoderRNN(input_size, hidden_size, output_size)
-
-
-
-enc_h_states_f = torch.zeros(MAX_LENGTH,1,1, hidden_size)
-enc_h_states_b = torch.zeros(MAX_LENGTH,1,1, hidden_size)
-
-for i in range(len(ipt)):
-    h_forward = E.get_initial_hidden_state()
-    h_backward = E.get_initial_hidden_state()
-    
-    h_backward = E.backward(ipt[0], h_backward)
-    h_forward = E.forward(ipt[0], h_forward)
-    
-    enc_h_states_f[i] = h_forward
-    enc_h_states_b[i] = h_backward
-    
-
-
-for j in range(len(trg)):
-    
-    trg_word = trg[j]
-    
-    hidden = D.get_initial_hidden_state()
-    
-    output, hidden, attention = D.forward(trg_word, hidden, enc_h_states_f, enc_h_states_b)
-    
-    
-
-
-#%%
-
-e_ij = AH.forward(D.get_initial_hidden_state(), enc_h_states_f[0], enc_h_states_b[0])
-
-
-    
-
-
-
-
-# AM = AlignmentModel(input_size, output_size, hidden_size)
-
-# AM.forward(torch.ones((10,1), dtype=int), torch.ones((10,1), dtype=int), torch.zeros((hidden_size, 2*hidden_size, )), 1)
-#%%
-
-"""
-implement generic RNN class that combines the two methods above and feed that to train?
-
-"""
-
-class biRNN(nn.Module):
-    def __init__(self, input_size, output_size, hidden_size, dropout=0.1, max_length=MAX_LENGTH):
-        self.encoder = EncoderRNN(input_size, hidden_size)
-        self.decoder = AttnDecoderRNN(hidden_size, output_size, dropout=dropout, max_length=MAX_LENGTH)
-        
-
-
-def initialize_parameters(model):
-    
-    print("not implemeneted yet, look at page 14 of paper to see what the weights should be initialized as")
-    
-    return model
 ######################################################################
 
-# def train(input_tensor, target_tensor, encoder, decoder, optimizer, criterion, max_length=MAX_LENGTH):
-def train(input_tensor, target_tensor, model, criterion, n_iter,lr, max_length=MAX_LENGTH):
+def train(input_tensor, target_tensor, encoder, decoder, optimizer, criterion, max_length=MAX_LENGTH):
     encoder_hidden = encoder.get_initial_hidden_state()
 
     # make sure the encoder and decoder are in training mode so dropout is applied
-    model.train()
-    loss = []
+    encoder.train()
+    decoder.train()
+
+    optimizer.zero_grad()
     
-    params = model.params()
+    encoder_hidden_f = encoder.get_initial_hidden_state()
+    encoder_hidden_b = encoder.get_initial_hidden_state()
     
-    opt = optim.SGD(params=params, lr=lr)
-    "*** YOUR CODE HERE ***"
-    # raise NotImplementedError
+    decoder_hidden = decoder.get_initial_hidden_state()
+    
+    loss = 0
+
+    encoder_hiddens_f = torch.zeros(len(input_tensor), 1)
+    encoder_hiddens_b = torch.zeros(len(input_tensor), 1)
+    
+    input_tensor_flipped = torch.flip(input_tensor, dims = [0,1])
+    # Loop over source sentence
+    for ei in range(len(input_tensor)):
+        encoder_hidden_f, encoder_hidden_b = encoder(input_tensor[ei], input_tensor_flipped[ei], encoder_hidden_f, encoder_hidden_b)
+        # append hidden forward and backward
+        encoder_hiddens_f[ei] = encoder_hidden_f
+        encoder_hiddens_b[ei] = encoder_hidden_b
+    
+    e_vals = []
+    for di in range(len(target_tensor)):
+        d_out, decoder_hidden, attention, e_vals = decoder(target_tensor[di], decoder_hidden, encoder_hiddens_f, encoder_hiddens_b, c_idx=di)
+        loss += criterion(d_out, target_tensor[di])
+        if target_tensor[di] == EOS_token:
+            break
     
     
-    # USE SGD!
-    
+    loss.backward()
+    optimizer.step()
 
     return loss.item() 
-
-
 
 ######################################################################
 
@@ -696,80 +608,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
-
-
-
-# class EncoderRNN(nn.Module):
-#     """the class for the enoder RNN
-#     """
-#     def __init__(self, input_size, hidden_size):
-#         super(EncoderRNN, self).__init__()
-#         self.hidden_size = hidden_size
-#         """Initilize a word embedding and bi-directional LSTM encoder
-#         For this assignment, you should *NOT* use nn.LSTM. 
-#         Instead, you should implement the equations yourself.
-#         See, for example, https://en.wikipedia.org/wiki/Long_short-term_memory#LSTM_with_a_forget_gate
-#         You should make your LSTM modular and re-use it in the Decoder.
-#         """
-#         "*** YOUR CODE HERE ***"
-#         # raise NotImplementedError
-#         self.input_size = input_size
-#         self.embed = Embedder(self.hidden_size, self.input_size)
-        
-#         # Get weight matrices
-#         self.Wh_forward = nn.Linear(self.input_size, self.hidden_size) # W = n x m
-#         self.Wz_forward = nn.Linear(self.input_size, self.hidden_size)
-#         self.Wr_forward = nn.Linear(self.input_size, self.hidden_size)
-        
-#         self.Uh_forward = nn.Linear(self.hidden_size, self.hidden_size)
-#         self.Uz_forward = nn.Linear(self.hidden_size, self.hidden_size)
-#         self.Ur_forward = nn.Linear(self.hidden_size, self.hidden_size)
-        
-#         # Get weight matrices for backward pass
-#         self.Wh_backward = nn.Linear(self.input_size, self.hidden_size) # W = n x m
-#         self.Wz_backward = nn.Linear(self.input_size, self.hidden_size)
-#         self.Wr_backward = nn.Linear(self.input_size, self.hidden_size)
-        
-#         self.Uh_backward = nn.Linear(self.hidden_size, self.hidden_size)
-#         self.Uz_backward = nn.Linear(self.hidden_size, self.hidden_size)
-#         self.Ur_backward = nn.Linear(self.hidden_size, self.hidden_size)
-        
-#         self.tanh = nn.Tanh()
-#         self.sigmoid = nn.Sigmoid()
-#         # return output, hidden
-
-
-#     def forward(self, x, hidden):
-#         """runs the forward pass of the encoder
-#         returns the output and the hidden state
-#         """
-#         "*** YOUR CODE HERE ***"
-#         x = self.embed(x)
-        
-#         r_i = self.sigmoid(self.Wr_forward(x) + self.Ur_forward(hidden))
-#         z_i = self.sigmoid(self.Wz_forward(x) + self.Uz_forward(hidden)) # = output
-#         # compute hidden at i
-#         h_i_bar = self.tanh(self.Wh_forward(x) + self.Uh_forward(r_i * hidden)) # = hidden
-#         h_i = (1- z_i) * hidden + z_i * h_i_bar
-#         return h_i
-    
-#     def backward(self, x, hidden):
-#         """runs the backward pass of the encoder
-#         returns the output and the hidden state
-#         """
-#         "*** YOUR CODE HERE ***"
-#         x = self.embed(x)
-        
-#         r_i = self.sigmoid(self.Wr_backward(x) + self.Ur_backward(hidden))
-#         z_i = self.sigmoid(self.Wz_backward(x) + self.Uz_backward(hidden)) # = output
-#         # compute hidden at i
-#         h_i_bar = self.tanh(self.Wh_backward(x) + self.Uh_backward(r_i * hidden)) # = hidden
-        
-#         h_i = (1- z_i) * hidden + z_i * h_i_bar
-#         return h_i
-#         # return output, hidden
-
-#     def get_initial_hidden_state(self):
-#         return torch.zeros(1, 1, self.hidden_size, device=device)
