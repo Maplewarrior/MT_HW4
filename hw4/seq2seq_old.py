@@ -4,7 +4,6 @@
 """
 This code is based on the tutorial by Sean Robertson <https://github.com/spro/practical-pytorch> found here:
 https://pytorch.org/tutorials/intermediate/seq2seq_translation_tutorial.html
-
 Students *MAY NOT* view the above tutorial or use it as a reference in any way. 
 """
 
@@ -12,7 +11,6 @@ Students *MAY NOT* view the above tutorial or use it as a reference in any way.
 from __future__ import unicode_literals, print_function, division
 
 import argparse
-from json import encoder
 import logging
 import random
 import time
@@ -150,7 +148,8 @@ class Embedder(nn.Module):
         out = self.embed(x)
         return out
     
- 
+
+        
 class Cell(nn.Module):
     def __init__(self, input_size, hidden_size):
         super().__init__()
@@ -199,15 +198,16 @@ class EncoderRNN(nn.Module):
         self.Cell_b = Cell(self.input_size, self.hidden_size) # backward sentence
         
         
-    def forward(self, x, x_flipped, hidden):
+    def forward(self, x, x_flipped, hidden_f, hidden_b):
 
         x = self.embed(x)
+
         x_flipped = self.embed(x_flipped)
 
-        h_i_f = self.Cell_f(x, hidden[:len(hidden)/2])
-        h_i_b = self.Cell_b(x_flipped, hidden[len(hidden)/2:])
+        h_i_f = self.Cell_f(x, hidden_f)
+        h_i_b = self.Cell_b(x_flipped, hidden_b)
 
-        return torch.cat((h_i_f, h_i_b), dim=-1)
+        return h_i_f, h_i_b
     
     def get_initial_hidden_state(self):
         return torch.zeros(1, 1, self.hidden_size, device=device)
@@ -223,15 +223,9 @@ class AlignmentHelper(nn.Module):
         
     def forward(self, s, h_forward, h_backward):
         h_j = torch.cat((h_forward, h_backward), dim=-1) # get bidirection annotations
-        print(f'{h_j.size()=}')
-        print(f'{s.size()=}')
         step1 = (self.tanh(self.Wa(s) + self.Ua(h_j))).squeeze(0)
-        print(f'{step1.size()=}')
-        print(f'{self.Va.weight.size()=}')
-        
         e_ij = self.Va(step1)
-        print(f'{e_ij.size()=}')
-        
+
         return e_ij            
 class AttnDecoderRNN(nn.Module):
     """the class for the decoder 
@@ -273,12 +267,12 @@ class AttnDecoderRNN(nn.Module):
         self.tanh = nn.Tanh()
         self.sigmoid = nn.Sigmoid()
         
-        self.align = AlignmentHelper(hidden_size, hidden_align_size) 
+        self.AlignHelper = AlignmentHelper(hidden_size, hidden_align_size) 
         
         self.out = nn.Linear(self.hidden_size, self.output_size)
         
         
-    def forward(self, input, hidden, encoder_output, e_vals=[], c_idx=0):
+    def forward(self, input, hidden, h_i_forwards, h_i_backwards, e_vals=[], c_idx=0):
         """runs the forward pass of the decoder
         returns the log_softmax, hidden state, and attn_weights
         
@@ -292,14 +286,16 @@ class AttnDecoderRNN(nn.Module):
         y = self.dropout(y)
         
         
-        print(f'{encoder_output.size()=}')
+        encoder_hiddens = torch.zeros(2, self.max_length, 1, self.hidden_size)
+        encoder_hiddens[0] = h_i_forwards
+        encoder_hiddens[1] = h_i_backwards
         
-        e_ij = self.align(hidden, encoder_hiddens[0][c_idx], encoder_hiddens[1][c_idx])
+        e_ij = self.AlignHelper.forward(hidden, encoder_hiddens[0][c_idx], encoder_hiddens[1][c_idx])
         
-
+        encoder_out = torch.cat((h_i_forwards, h_i_backwards), dim=-1)
         if len(e_vals) == 0:
             # softmax of a single value is 1 :)
-            c_i = 1 * encoder_output
+            c_i = 1 * encoder_out
             attention = None
             
             val = e_ij[c_idx].item()
@@ -311,7 +307,7 @@ class AttnDecoderRNN(nn.Module):
 
             e_t = torch.tensor(tuple(e_vals))
             attention = self.softmax(e_t)
-            c_i = attention[-1] * encoder_output
+            c_i = attention[-1] * encoder_out
         
         r_i = self.sigmoid(self.Wr(y) + self.Ur(hidden) ) #+ self.Cr(c_i))
         z_i = self.sigmoid(self.Wz(y) + self.Uz(hidden) + self.Cz(c_i))
@@ -357,7 +353,8 @@ def train(input_tensor, target_tensor, encoder, decoder, optimizer, criterion, m
     
     loss = 0
     
-    encoder_hiddens = torch.zeros(max_length*2, 1, encoder_hidden_f.size(-1))
+    encoder_hiddens_f = torch.zeros(max_length, 1, encoder_hidden_f.size(-1))
+    encoder_hiddens_b = torch.zeros(max_length, 1, encoder_hidden_f.size(-1))
     
     input_tensor_flipped = torch.flip(input_tensor, dims = [0,1])
 
