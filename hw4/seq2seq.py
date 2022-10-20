@@ -525,7 +525,7 @@ def main():
                                            args.train_file)
 
     encoder = EncoderRNN(src_vocab.n_words, args.hidden_size).to(device)
-    decoder = AttnDecoderRNN(args.hidden_size, tgt_vocab.n_words, dropout_p=0.1).to(device)
+    decoder = AttnDecoderRNN(args.hidden_size, args.hidden_size, tgt_vocab.n_words, dropout=0.1).to(device)
 
     # encoder/decoder weights are randomly initilized
     # if checkpointed, load saved weights
