@@ -43,17 +43,18 @@ class AttnDecoderRNN(nn.Module):
     def forward(self, input, hidden, encoder_outputs):
         embedded = self.embedding(input).view(1, 1, -1)
         embedded = self.dropout(embedded)
-
-        print(embedded[0].size())
-        print(hidden[0].size())
+        
+        print("ENC_OUT", encoder_outputs.size())
+        # print(embedded[0].size())
+        # print(hidden[0].size())
         
         attn_used = self.attn(torch.cat((embedded[0], hidden[0]), 1))
-        print("softmax ipt dim\n", attn_used.size())
+        # print("softmax ipt dim\n", attn_used.size())
         
         attn_weights = F.softmax(
             self.attn(torch.cat((embedded[0], hidden[0]), 1)), dim=1)
         
-        print("attn_weights:\n", attn_weights.size())
+        # print("attn_weights:\n", attn_weights.size())
         
         attn_applied = torch.bmm(attn_weights.unsqueeze(0),
                                  encoder_outputs.unsqueeze(0))
@@ -64,10 +65,10 @@ class AttnDecoderRNN(nn.Module):
         output = F.relu(output)
         output, hidden = self.gru(output, hidden)
         
-        print(output.size())
+        # print(output.size())
         output = F.log_softmax(self.out(output[0]), dim=1)
         
-        print(output.size())
+        # print(output.size())
         return output, hidden, attn_weights
 
     def initHidden(self):
@@ -92,6 +93,7 @@ out, hidden, attn_weights = D.forward(ipt, D.initHidden(), torch.zeros(MAX_LENGT
 # print(out.size())
 # print(hidden.size())
 # print(attn_weights.size())
+print(out.size())
 
 
 #%%
