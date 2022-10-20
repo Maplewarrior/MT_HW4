@@ -207,7 +207,7 @@ class EncoderRNN(nn.Module):
     
     
         
-#%%
+
 input_size = 620
 output_size = 650
 hidden_size = 1000
@@ -221,7 +221,7 @@ E = EncoderRNN(input_size, hidden_size)
 
 c_i, h_i, c_i_b, h_i_b = E.forward(ipt[0],ipt[-1], E.get_initial_hidden_state(), E.get_initial_hidden_state())
 
-#%%
+
     
 
 
