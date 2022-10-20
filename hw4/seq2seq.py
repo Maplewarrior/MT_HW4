@@ -225,7 +225,7 @@ class AlignmentHelper(nn.Module):
 class AttnDecoderRNN(nn.Module):
     """the class for the decoder 
     """
-    def __init__(self, input_size, hidden_size, output_size, maxout=500, dropout=0.1, max_length=MAX_LENGTH):
+    def __init__(self, input_size, hidden_size, hidden_align_size, output_size, maxout=500, dropout=0.1, max_length=MAX_LENGTH):
         super(AttnDecoderRNN, self).__init__()
         self.hidden_size = hidden_size
         self.input_size = input_size
@@ -539,7 +539,6 @@ def main():
     dev_pairs = split_lines(args.dev_file)
     test_pairs = split_lines(args.test_file)
     
-    print("SIZE:", tensors_from_pair(src_vocab, tgt_vocab, train_pairs[0])[0].size())
     
     # set up optimization/loss
     params = list(encoder.parameters()) + list(decoder.parameters())  # .parameters() returns generator
