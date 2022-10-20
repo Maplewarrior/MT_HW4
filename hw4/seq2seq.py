@@ -135,16 +135,21 @@ def tensors_from_pair(src_vocab, tgt_vocab, pair):
 ######################################################################
 
 class Embedder(nn.Module):
-    def __init__(self, hidden_size, input_size):
+    def __init__(self, input_size, hidden_size):
         super().__init__()
-        # self.input_size = input_size
-        self.embed = nn.Embedding(hidden_size, input_size)
+        # self.embed = nn.Embedding(hidden_size, input_size)
+        
+        if input_size > hidden_size:
+            self.embed = nn.Embedding(input_size+1, input_size)
+        else:
+            self.embed = nn.Embedding(hidden_size, input_size)
         
     def forward(self, x):
+
         out = self.embed(x)
-        # reshape to embedding dim x src_len
-        # out = out.squeeze(1)
         return out
+    
+
         
 class Cell(nn.Module):
     def __init__(self, input_size, hidden_size):
@@ -164,6 +169,8 @@ class Cell(nn.Module):
         self.sigmoid = nn.Sigmoid()
     
     def forward(self, x, hidden):
+        
+        
         r_i = self.sigmoid(self.Wr(x) + self.Ur(hidden))
         z_i = self.sigmoid(self.Wz(x) + self.Uz(hidden))        
         h_i_bar = self.tanh(self.Wr(x) + self.Uh(r_i * hidden)) # = hidden
@@ -185,19 +192,22 @@ class EncoderRNN(nn.Module):
         "*** YOUR CODE HERE ***"
         # raise NotImplementedError
         self.input_size = input_size
-        self.embed = Embedder(self.hidden_size, self.input_size)
         self.hidden_size = hidden_size
+        self.embed = Embedder(self.input_size, self.hidden_size)
         
         self.Cell_f = Cell(self.input_size, self.hidden_size) # forward sentence
         self.Cell_b = Cell(self.input_size, self.hidden_size) # backward sentence
         
         
     def forward(self, x, x_flipped, hidden_f, hidden_b):
+
         x = self.embed(x)
+
         x_flipped = self.embed(x_flipped)
+
         h_i_f = self.Cell_f(x, hidden_f)
         h_i_b = self.Cell_b(x_flipped, hidden_b)
-        
+
         return h_i_f, h_i_b
     
     def get_initial_hidden_state(self):
@@ -238,7 +248,7 @@ class AttnDecoderRNN(nn.Module):
         """
         "*** YOUR CODE HERE ***"
         # raise NotImplementedError
-        self.embed = Embedder(hidden_size, output_size)
+        self.embed = Embedder(output_size, hidden_size)
         self.softmax = nn.Softmax(dim=1) 
         
         #### make sure W's and U's should be different from the ones in the encoder ####
@@ -254,22 +264,17 @@ class AttnDecoderRNN(nn.Module):
         self.Cz = nn.Linear(2*self.hidden_size, self.hidden_size)
         self.Cr = nn.Linear(2*self.hidden_size, self.hidden_size)
         
-        
         self.Wo = nn.Linear(self.maxout, self.output_size)
         self.Uo = nn.Linear(self.hidden_size, 2*self.maxout)
         self.Co = nn.Linear(2*self.hidden_size, 2*self.maxout)
         self.Vo = nn.Linear(self.output_size, 2*self.maxout)
         
-        
         self.tanh = nn.Tanh()
         self.sigmoid = nn.Sigmoid()
-        
         
         self.AlignHelper = AlignmentHelper(hidden_size, hidden_align_size) 
         
         self.out = nn.Linear(self.hidden_size, self.output_size)
-        
-        
         
         
     def forward(self, input, hidden, h_i_forwards, h_i_backwards, e_vals=[], c_idx=0):
@@ -309,10 +314,7 @@ class AttnDecoderRNN(nn.Module):
         s_tilde = self.tanh(self.Ws(y) + self.Us(r_i * hidden) + self.Cs(c_i))
         s_i = (1- z_i) * hidden + z_i * s_tilde
         
-        
-        
         t_tilde = self.Uo(hidden) + self.Vo(y) + self.Co(c_i)
-        
         
         t_i = torch.zeros(self.max_length, self.maxout)
         for i in range(self.max_length):
@@ -333,6 +335,8 @@ class AttnDecoderRNN(nn.Module):
 ######################################################################
 
 def train(input_tensor, target_tensor, encoder, decoder, optimizer, criterion, max_length=MAX_LENGTH):
+    i_no = 1
+
     encoder_hidden = encoder.get_initial_hidden_state()
 
     # make sure the encoder and decoder are in training mode so dropout is applied
@@ -347,19 +351,24 @@ def train(input_tensor, target_tensor, encoder, decoder, optimizer, criterion, m
     decoder_hidden = decoder.get_initial_hidden_state()
     
     loss = 0
-
-    encoder_hiddens_f = torch.zeros(len(input_tensor), 1)
-    encoder_hiddens_b = torch.zeros(len(input_tensor), 1)
+    
+    encoder_hiddens_f = torch.zeros(max_length, 1, encoder_hidden_f.size(-1))
+    encoder_hiddens_b = torch.zeros(max_length, 1, encoder_hidden_f.size(-1))
     
     input_tensor_flipped = torch.flip(input_tensor, dims = [0,1])
+
     # Loop over source sentence
     for ei in range(len(input_tensor)):
-        encoder_hidden_f, encoder_hidden_b = encoder(input_tensor[ei], input_tensor_flipped[ei], encoder_hidden_f, encoder_hidden_b)
-        # append hidden forward and backward
+
+        encoder_hidden_f, encoder_hidden_b = encoder(input_tensor[ei], input_tensor[ei], encoder_hidden_f, encoder_hidden_b)
+        # append hidden forward and backward input_tensor_flipped[ei]
+
+
         encoder_hiddens_f[ei] = encoder_hidden_f
         encoder_hiddens_b[ei] = encoder_hidden_b
     
     e_vals = []
+
     for di in range(len(target_tensor)):
         d_out, decoder_hidden, attention, e_vals = decoder(target_tensor[di], decoder_hidden, encoder_hiddens_f, encoder_hiddens_b, c_idx=di)
         loss += criterion(d_out, target_tensor[di])
@@ -369,6 +378,7 @@ def train(input_tensor, target_tensor, encoder, decoder, optimizer, criterion, m
     
     loss.backward()
     optimizer.step()
+    
 
     return loss.item() 
 
@@ -476,7 +486,7 @@ def clean(strx):
 
 
 ######################################################################
-#%%
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--hidden_size', default=256, type=int,
@@ -524,7 +534,7 @@ def main():
                                            args.tgt_lang,
                                            args.train_file)
 
-    encoder = EncoderRNN(src_vocab.n_words, args.hidden_size).to(device)
+    encoder = EncoderRNN(src_vocab.n_words, args.hidden_size)#.to(device)
     decoder = AttnDecoderRNN(args.hidden_size, args.hidden_size, tgt_vocab.n_words, dropout=0.1).to(device)
 
     # encoder/decoder weights are randomly initilized
@@ -556,7 +566,6 @@ def main():
         iter_num += 1
         training_pair = tensors_from_pair(src_vocab, tgt_vocab, random.choice(train_pairs))
         input_tensor = training_pair[0]
-        print(input_tensor)
         target_tensor = training_pair[1]
         loss = train(input_tensor, target_tensor, encoder,
                      decoder, optimizer, criterion)
