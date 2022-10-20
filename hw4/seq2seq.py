@@ -225,10 +225,14 @@ class AlignmentHelper(nn.Module):
     def forward(self, s, h_forward, h_backward):
 
         h_j = torch.cat((h_forward, h_backward), dim=-1) # get bidirection annotations
+        print(f'{h_j.size()=}')
+        print(f'{s.size()=}')
+        step1 = (self.tanh(self.Wa(s) + self.Ua(h_j))).squeeze(0)
+        print(f'{step1.size()=}')
+        print(f'{self.Va.weight.size()=}')
         
-        step1 = (self.tanh(self.Wa(s) + self.Ua(h_j))).squeeze(0).T
-        
-        e_ij = self.Va.weight @ step1
+        e_ij = self.Va(step1)
+        print(f'{e_ij.size()=}')
         
         return e_ij            
 class AttnDecoderRNN(nn.Module):
@@ -248,7 +252,7 @@ class AttnDecoderRNN(nn.Module):
         "*** YOUR CODE HERE ***"
         # raise NotImplementedError
         self.embed = Embedder(output_size, hidden_size)
-        self.softmax = nn.Softmax(dim=1) 
+        self.softmax = nn.Softmax(dim=-1) 
         
         #### make sure W's and U's should be different from the ones in the encoder ####
         self.Ws = nn.Linear(self.output_size, self.hidden_size) # W = n x m
@@ -302,11 +306,11 @@ class AttnDecoderRNN(nn.Module):
             c_i = 1 * encoder_out
             attention = None
             
-            val = e_ij.item()
+            val = e_ij[c_idx].item()
             e_vals = [val]
         else:
 
-            val = e_ij.item()
+            val = e_ij[c_idx].item()
             e_vals.append(val)
 
             e_t = torch.tensor(tuple(e_vals))
@@ -318,7 +322,6 @@ class AttnDecoderRNN(nn.Module):
         s_tilde = self.tanh(self.Ws(y) + self.Us(r_i * hidden) + self.Cs(c_i))
         s_i = (1- z_i) * hidden + z_i * s_tilde
 
-        
         t_tilde = self.Uo(hidden) + self.Vo(y) + self.Co(c_i)
         
         t_i = torch.zeros(1, self.maxout)
@@ -326,8 +329,6 @@ class AttnDecoderRNN(nn.Module):
         for j in range(self.maxout):
             val = max(t_tilde[c_idx][0][2*j-1], t_tilde[c_idx][0][2*j])
             t_i[0][j] = val
-        
-        
         
         output = torch.exp(y.T * self.Wo.weight @ t_i.T).T
         output = F.log_softmax(output, dim=1)
