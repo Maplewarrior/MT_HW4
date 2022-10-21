@@ -330,7 +330,6 @@ class AttnDecoderRNN(nn.Module):
         
         output = F.log_softmax(output, dim=-1)
         
-        
         return output, s_i, attention, e_vals
         # return log_softmax, hidden, attn_weights
 
@@ -382,7 +381,7 @@ def train(input_tensor, target_tensor, encoder, decoder, optimizer, criterion, m
     loss.backward()
     optimizer.step()
     
-    return loss.item() 
+    return loss.item()/len(target_tensor)
 
 ######################################################################
 
@@ -424,14 +423,16 @@ def translate(encoder, decoder, sentence, src_vocab, tgt_vocab, max_length=MAX_L
         
         
         for di in range(max_length):
+            print("iter", di)
+            print("DEC IN", decoder_input)
             decoder_output, decoder_hidden, decoder_attention, e_vals = decoder(
                 decoder_input, decoder_hidden, encoder_outputs_all_f,
                 encoder_outputs_all_b, e_vals, di)
             
             decoder_attentions[di] = decoder_attention[:,0,0]
+            # print(decoder_attetion[:,0,0])
 
             topv, topi = decoder_output.data.topk(1)
-            topi = topi.squeeze(1)
 
             if topi.item() == EOS_index:
                 decoded_words.append(EOS_token)
@@ -439,7 +440,7 @@ def translate(encoder, decoder, sentence, src_vocab, tgt_vocab, max_length=MAX_L
             else:
                 decoded_words.append(tgt_vocab.index2word[topi.item()])
                 
-            decoder_input = topi.detach()
+            decoder_input = topi.squeeze(1).detach()
 
         return decoded_words, decoder_attentions[:di + 1]
 
@@ -509,7 +510,7 @@ def main():
                     help='hidden size of encoder/decoder, also word vector size')
     ap.add_argument('--n_iters', default=10000, type=int,
                     help='total number of examples to train on')
-    ap.add_argument('--print_every', default=5, type=int,
+    ap.add_argument('--print_every', default=1, type=int,
                     help='print loss info every this many training examples')
     ap.add_argument('--checkpoint_every', default=10000, type=int,
                     help='write out checkpoint every this many training examples')
