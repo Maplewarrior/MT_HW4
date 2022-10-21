@@ -363,7 +363,7 @@ def train(input_tensor, target_tensor, encoder, decoder, optimizer, criterion, m
     # Loop over source sentence
     for ei in range(len(input_tensor)):
 
-        encoder_hidden_f, encoder_hidden_b = encoder(input_tensor[ei], input_tensor[ei], encoder_hidden_f, encoder_hidden_b)
+        encoder_hidden_f, encoder_hidden_b = encoder(input_tensor[ei], input_tensor_flipped[ei], encoder_hidden_f, encoder_hidden_b)
         # append hidden forward and backward input_tensor_flipped[ei]
 
         encoder_hiddens_f[ei] = encoder_hidden_f
@@ -423,25 +423,29 @@ def translate(encoder, decoder, sentence, src_vocab, tgt_vocab, max_length=MAX_L
         
         
         for di in range(max_length):
-            print("iter", di)
-            print("DEC IN", decoder_input)
+            
             decoder_output, decoder_hidden, decoder_attention, e_vals = decoder(
                 decoder_input, decoder_hidden, encoder_outputs_all_f,
                 encoder_outputs_all_b, e_vals, di)
             
             decoder_attentions[di] = decoder_attention[:,0,0]
+            # print("dec:", decoder_output)
+            
             # print(decoder_attetion[:,0,0])
 
             topv, topi = decoder_output.data.topk(1)
+            # print("topi", topi)
 
             if topi.item() == EOS_index:
                 decoded_words.append(EOS_token)
                 break
             else:
                 decoded_words.append(tgt_vocab.index2word[topi.item()])
+                # print("dw", decoded_words)
                 
             decoder_input = topi.squeeze(1).detach()
-
+        # print("!!!!!!!!!!!!RETURNED!!!!!!!!!!!!!!!!!!!!!")
+        
         return decoded_words, decoder_attentions[:di + 1]
 
 
@@ -475,15 +479,24 @@ def translate_random_sentence(encoder, decoder, pairs, src_vocab, tgt_vocab, n=1
 
 ######################################################################
 
-def show_attention(input_sentence, output_words, attentions):
-    """visualize the attention mechanism. And save it to a file. 
-    Plots should look roughly like this: https://i.stack.imgur.com/PhtQi.png
-    You plots should include axis labels and a legend.
-    you may want to use matplotlib.
-    """
+def show_attention(src_sent, prediction, attention_vals):
     
-    "*** YOUR CODE HERE ***"
-    raise NotImplementedError
+    attentions = attention_vals.numpy()
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    cax = ax.matshow(attentions, cmap='spring')
+    fig.colorbar(cax)
+
+    
+    ax.set_xticklabels([''] + src_sent.split(" ") +
+                       ['<EOS>'], rotation=90)
+    ax.set_yticklabels([''] + prediction)
+
+    
+    ax.xaxis.set_major_locator(ticker.MultipleLocator(1))
+    ax.yaxis.set_major_locator(ticker.MultipleLocator(1))
+
+    plt.show()
 
 
 def translate_and_show_attention(input_sentence, encoder1, decoder1, src_vocab, tgt_vocab):
@@ -510,9 +523,9 @@ def main():
                     help='hidden size of encoder/decoder, also word vector size')
     ap.add_argument('--n_iters', default=10000, type=int,
                     help='total number of examples to train on')
-    ap.add_argument('--print_every', default=1, type=int,
+    ap.add_argument('--print_every', default=25, type=int,
                     help='print loss info every this many training examples')
-    ap.add_argument('--checkpoint_every', default=10000, type=int,
+    ap.add_argument('--checkpoint_every', default=500, type=int,
                     help='write out checkpoint every this many training examples')
     ap.add_argument('--initial_learning_rate', default=0.01, type=int,
                     help='initial learning rate')
