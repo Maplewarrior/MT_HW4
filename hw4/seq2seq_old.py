@@ -244,7 +244,7 @@ class AttnDecoderRNN(nn.Module):
         "*** YOUR CODE HERE ***"
         # raise NotImplementedError
         self.embed = Embedder(output_size, hidden_size)
-        self.softmax = nn.Softmax(dim=-1) 
+
         
         #### make sure W's and U's should be different from the ones in the encoder ####
         self.Ws = nn.Linear(self.output_size, self.hidden_size) # W = n x m
@@ -285,32 +285,40 @@ class AttnDecoderRNN(nn.Module):
         y = self.embed(input)
         y = self.dropout(y)
         
-        print("h_i", h_i_forwards.size())
+        print("ipt", input.size())
+        print("y", y.size())
+        print("s_i", hidden.size())
+        print("h_i_f", h_i_forwards.size())
+        print("h_i_b", h_i_backwards.size())
         encoder_hiddens = torch.zeros(2, self.max_length, 1, self.hidden_size)
-        print("forward", h_i_forwards.size())
-        print("backward", h_i_backwards.size())
+        
         
         encoder_hiddens[0] = h_i_forwards
         encoder_hiddens[1] = h_i_backwards
+        encoder_out = torch.cat((h_i_forwards, h_i_backwards), dim=-1)
         
         e_ij = self.AlignHelper.forward(hidden, encoder_hiddens[0][c_idx], encoder_hiddens[1][c_idx])
-        print("E_IJ", e_ij.size())
-        encoder_out = torch.cat((h_i_forwards, h_i_backwards), dim=-1)
-        if len(e_vals) == 0:
-            # softmax of a single value is 1 :)
-            c_i = 1 * encoder_out
-            attention = torch.zeros(15,1,1)
-            val = e_ij[c_idx].item()
-            e_vals = [val]
-        else:
-
-            val = e_ij[c_idx].item()
-            e_vals.append(val)
-            e_t = torch.tensor(tuple(e_vals))
-            attention = self.softmax(e_t)
-            c_i = attention[-1] * encoder_out
+        attention = F.softmax(e_ij, dim=0)
         
-        r_i = self.sigmoid(self.Wr(y) + self.Ur(hidden) ) #+ self.Cr(c_i))
+        
+        c_i = attention @ encoder_out
+        
+        # if len(e_vals) == 0:
+        #     # softmax of a single value is 1 :)
+        #     c_i = 1 * encoder_out
+        #     attention = torch.zeros(15,1,1)
+        #     val = e_ij[c_idx].item()
+        #     e_vals = [val]
+        # else:
+
+        #     val = e_ij[c_idx].item()
+        #     e_vals.append(val)
+        #     e_t = torch.tensor(tuple(e_vals))
+        #     attention = self.softmax(e_t)
+        #     c_i = attention[-1] * encoder_out
+        
+        
+        r_i = self.sigmoid(self.Wr(y) + self.Ur(hidden) + self.Cr(c_i)) 
         z_i = self.sigmoid(self.Wz(y) + self.Uz(hidden) + self.Cz(c_i))
         s_tilde = self.tanh(self.Ws(y) + self.Us(r_i * hidden) + self.Cs(c_i))
         s_i = (1- z_i) * hidden + z_i * s_tilde
@@ -324,14 +332,16 @@ class AttnDecoderRNN(nn.Module):
             t_i[0][j] = val
         
         output = torch.exp(y.T * self.Wo.weight @ t_i.T).T
-        output = F.log_softmax(output, dim=1)
+        
+        
+        output = F.log_softmax(output, dim=-1)
         
         
         return output, s_i, attention, e_vals
         # return log_softmax, hidden, attn_weights
 
     def get_initial_hidden_state(self):
-        return torch.zeros(15, 1, self.hidden_size, device=device)
+        return torch.zeros(self.max_length, 1, self.hidden_size, device=device)
 
 
 ######################################################################
@@ -412,7 +422,10 @@ def translate(encoder, decoder, sentence, src_vocab, tgt_vocab, max_length=MAX_L
             encoder_outputs_all_f[ei] = encoder_hidden_b
             # encoder_outputs[ei] += encoder_output[0, 0]
 
-        decoder_input = torch.tensor([[SOS_index]], device=device)
+        decoder_input = torch.tensor([SOS_index], device=device)
+        print("dec_in!!!!!", decoder_input.size())
+        print("SOS_IDX", SOS_index)
+
 
         decoder_hidden = decoder.get_initial_hidden_state()
 
@@ -426,15 +439,18 @@ def translate(encoder, decoder, sentence, src_vocab, tgt_vocab, max_length=MAX_L
             decoder_output, decoder_hidden, decoder_attention, e_vals = decoder(
                 decoder_input, decoder_hidden, encoder_outputs_all_f,
                 encoder_outputs_all_b, e_vals, di)
-            print(decoder_attention)
+            
             decoder_attentions[di] = decoder_attention[:,0,0]
+            print("decoder_out!!", decoder_output.size())
             topv, topi = decoder_output.data.topk(1)
+            print("topiiiii", topi.size())
             if topi.item() == EOS_index:
                 decoded_words.append(EOS_token)
                 break
             else:
                 decoded_words.append(tgt_vocab.index2word[topi.item()])
-            decoder_input = topi.squeeze().detach()
+                
+            decoder_input = topi.detach()
 
         return decoded_words, decoder_attentions[:di + 1]
 
