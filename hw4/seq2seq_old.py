@@ -486,7 +486,6 @@ def show_attention(src_sent, prediction, attention_vals):
     ax = fig.add_subplot(111)
     cax = ax.matshow(attentions, cmap='spring')
     fig.colorbar(cax)
-
     
     ax.set_xticklabels([''] + src_sent.split(" ") +
                        ['<EOS>'], rotation=90)
