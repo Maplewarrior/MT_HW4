@@ -285,13 +285,7 @@ class AttnDecoderRNN(nn.Module):
         y = self.embed(input)
         y = self.dropout(y)
         
-        print("ipt", input.size())
-        print("y", y.size())
-        print("s_i", hidden.size())
-        print("h_i_f", h_i_forwards.size())
-        print("h_i_b", h_i_backwards.size())
         encoder_hiddens = torch.zeros(2, self.max_length, 1, self.hidden_size)
-        
         
         encoder_hiddens[0] = h_i_forwards
         encoder_hiddens[1] = h_i_backwards
@@ -385,11 +379,9 @@ def train(input_tensor, target_tensor, encoder, decoder, optimizer, criterion, m
         if target_tensor[di] == EOS_token:
             break
     
-    
     loss.backward()
     optimizer.step()
     
-
     return loss.item() 
 
 ######################################################################
@@ -423,10 +415,6 @@ def translate(encoder, decoder, sentence, src_vocab, tgt_vocab, max_length=MAX_L
             # encoder_outputs[ei] += encoder_output[0, 0]
 
         decoder_input = torch.tensor([SOS_index], device=device)
-        print("dec_in!!!!!", decoder_input.size())
-        print("SOS_IDX", SOS_index)
-
-
         decoder_hidden = decoder.get_initial_hidden_state()
 
         decoded_words = []
@@ -441,9 +429,10 @@ def translate(encoder, decoder, sentence, src_vocab, tgt_vocab, max_length=MAX_L
                 encoder_outputs_all_b, e_vals, di)
             
             decoder_attentions[di] = decoder_attention[:,0,0]
-            print("decoder_out!!", decoder_output.size())
+
             topv, topi = decoder_output.data.topk(1)
-            print("topiiiii", topi.size())
+            topi = topi.squeeze(1)
+
             if topi.item() == EOS_index:
                 decoded_words.append(EOS_token)
                 break
@@ -518,13 +507,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--hidden_size', default=256, type=int,
                     help='hidden size of encoder/decoder, also word vector size')
-    ap.add_argument('--n_iters', default=100000, type=int,
+    ap.add_argument('--n_iters', default=10000, type=int,
                     help='total number of examples to train on')
-    ap.add_argument('--print_every', default=1, type=int,
+    ap.add_argument('--print_every', default=5, type=int,
                     help='print loss info every this many training examples')
     ap.add_argument('--checkpoint_every', default=10000, type=int,
                     help='write out checkpoint every this many training examples')
-    ap.add_argument('--initial_learning_rate', default=0.001, type=int,
+    ap.add_argument('--initial_learning_rate', default=0.01, type=int,
                     help='initial learning rate')
     ap.add_argument('--src_lang', default='fr',
                     help='Source (input) language code, e.g. "fr"')
