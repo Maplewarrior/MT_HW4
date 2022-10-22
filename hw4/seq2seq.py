@@ -4,7 +4,6 @@
 """
 This code is based on the tutorial by Sean Robertson <https://github.com/spro/practical-pytorch> found here:
 https://pytorch.org/tutorials/intermediate/seq2seq_translation_tutorial.html
-
 Students *MAY NOT* view the above tutorial or use it as a reference in any way. 
 """
 
@@ -12,7 +11,6 @@ Students *MAY NOT* view the above tutorial or use it as a reference in any way.
 from __future__ import unicode_literals, print_function, division
 
 import argparse
-from json import encoder
 import logging
 import random
 import time
@@ -150,7 +148,8 @@ class Embedder(nn.Module):
         out = self.embed(x)
         return out
     
- 
+
+        
 class Cell(nn.Module):
     def __init__(self, input_size, hidden_size):
         super().__init__()
@@ -199,15 +198,16 @@ class EncoderRNN(nn.Module):
         self.Cell_b = Cell(self.input_size, self.hidden_size) # backward sentence
         
         
-    def forward(self, x, x_flipped, hidden):
+    def forward(self, x, x_flipped, hidden_f, hidden_b):
 
         x = self.embed(x)
+
         x_flipped = self.embed(x_flipped)
 
-        h_i_f = self.Cell_f(x, hidden[:len(hidden)/2])
-        h_i_b = self.Cell_b(x_flipped, hidden[len(hidden)/2:])
+        h_i_f = self.Cell_f(x, hidden_f)
+        h_i_b = self.Cell_b(x_flipped, hidden_b)
 
-        return torch.cat((h_i_f, h_i_b), dim=-1)
+        return h_i_f, h_i_b
     
     def get_initial_hidden_state(self):
         return torch.zeros(1, 1, self.hidden_size, device=device)
@@ -223,15 +223,9 @@ class AlignmentHelper(nn.Module):
         
     def forward(self, s, h_forward, h_backward):
         h_j = torch.cat((h_forward, h_backward), dim=-1) # get bidirection annotations
-        print(f'{h_j.size()=}')
-        print(f'{s.size()=}')
         step1 = (self.tanh(self.Wa(s) + self.Ua(h_j))).squeeze(0)
-        print(f'{step1.size()=}')
-        print(f'{self.Va.weight.size()=}')
-        
         e_ij = self.Va(step1)
-        print(f'{e_ij.size()=}')
-        
+
         return e_ij            
 class AttnDecoderRNN(nn.Module):
     """the class for the decoder 
@@ -250,7 +244,7 @@ class AttnDecoderRNN(nn.Module):
         "*** YOUR CODE HERE ***"
         # raise NotImplementedError
         self.embed = Embedder(output_size, hidden_size)
-        self.softmax = nn.Softmax(dim=-1) 
+
         
         #### make sure W's and U's should be different from the ones in the encoder ####
         self.Ws = nn.Linear(self.output_size, self.hidden_size) # W = n x m
@@ -273,12 +267,12 @@ class AttnDecoderRNN(nn.Module):
         self.tanh = nn.Tanh()
         self.sigmoid = nn.Sigmoid()
         
-        self.align = AlignmentHelper(hidden_size, hidden_align_size) 
+        self.AlignHelper = AlignmentHelper(hidden_size, hidden_align_size) 
         
         self.out = nn.Linear(self.hidden_size, self.output_size)
         
         
-    def forward(self, input, hidden, encoder_output, e_vals=[], c_idx=0):
+    def forward(self, input, hidden, h_i_forwards, h_i_backwards, e_vals=[], c_idx=0):
         """runs the forward pass of the decoder
         returns the log_softmax, hidden state, and attn_weights
         
@@ -291,29 +285,34 @@ class AttnDecoderRNN(nn.Module):
         y = self.embed(input)
         y = self.dropout(y)
         
+        encoder_hiddens = torch.zeros(2, self.max_length, 1, self.hidden_size)
         
-        print(f'{encoder_output.size()=}')
+        encoder_hiddens[0] = h_i_forwards
+        encoder_hiddens[1] = h_i_backwards
+        encoder_out = torch.cat((h_i_forwards, h_i_backwards), dim=-1)
         
-        e_ij = self.align(hidden, encoder_hiddens[0][c_idx], encoder_hiddens[1][c_idx])
+        e_ij = self.AlignHelper.forward(hidden, encoder_hiddens[0][c_idx], encoder_hiddens[1][c_idx])
+        attention = F.softmax(e_ij, dim=0)
         
+        
+        c_i = attention @ encoder_out
+        
+        # if len(e_vals) == 0:
+        #     # softmax of a single value is 1 :)
+        #     c_i = 1 * encoder_out
+        #     attention = torch.zeros(15,1,1)
+        #     val = e_ij[c_idx].item()
+        #     e_vals = [val]
+        # else:
 
-        if len(e_vals) == 0:
-            # softmax of a single value is 1 :)
-            c_i = 1 * encoder_output
-            attention = None
-            
-            val = e_ij[c_idx].item()
-            e_vals = [val]
-        else:
-
-            val = e_ij[c_idx].item()
-            e_vals.append(val)
-
-            e_t = torch.tensor(tuple(e_vals))
-            attention = self.softmax(e_t)
-            c_i = attention[-1] * encoder_output
+        #     val = e_ij[c_idx].item()
+        #     e_vals.append(val)
+        #     e_t = torch.tensor(tuple(e_vals))
+        #     attention = self.softmax(e_t)
+        #     c_i = attention[-1] * encoder_out
         
-        r_i = self.sigmoid(self.Wr(y) + self.Ur(hidden) ) #+ self.Cr(c_i))
+        
+        r_i = self.sigmoid(self.Wr(y) + self.Ur(hidden) + self.Cr(c_i)) 
         z_i = self.sigmoid(self.Wz(y) + self.Uz(hidden) + self.Cz(c_i))
         s_tilde = self.tanh(self.Ws(y) + self.Us(r_i * hidden) + self.Cs(c_i))
         s_i = (1- z_i) * hidden + z_i * s_tilde
@@ -327,22 +326,21 @@ class AttnDecoderRNN(nn.Module):
             t_i[0][j] = val
         
         output = torch.exp(y.T * self.Wo.weight @ t_i.T).T
-        output = F.log_softmax(output, dim=1)
         
+        
+        output = F.log_softmax(output, dim=-1)
         
         return output, s_i, attention, e_vals
         # return log_softmax, hidden, attn_weights
 
     def get_initial_hidden_state(self):
-        return torch.zeros(1, 1, self.hidden_size, device=device)
+        return torch.zeros(self.max_length, 1, self.hidden_size, device=device)
 
 
 ######################################################################
 
 def train(input_tensor, target_tensor, encoder, decoder, optimizer, criterion, max_length=MAX_LENGTH):
-    i_no = 1
 
-    encoder_hidden = encoder.get_initial_hidden_state()
 
     # make sure the encoder and decoder are in training mode so dropout is applied
     encoder.train()
@@ -357,21 +355,22 @@ def train(input_tensor, target_tensor, encoder, decoder, optimizer, criterion, m
     
     loss = 0
     
-    encoder_hiddens = torch.zeros(max_length*2, 1, encoder_hidden_f.size(-1))
+    encoder_hiddens_f = torch.zeros(max_length, 1, encoder_hidden_f.size(-1))
+    encoder_hiddens_b = torch.zeros(max_length, 1, encoder_hidden_f.size(-1))
     
     input_tensor_flipped = torch.flip(input_tensor, dims = [0,1])
 
     # Loop over source sentence
     for ei in range(len(input_tensor)):
 
-        encoder_hidden_f, encoder_hidden_b = encoder(input_tensor[ei], input_tensor[ei], encoder_hidden_f, encoder_hidden_b)
+        encoder_hidden_f, encoder_hidden_b = encoder(input_tensor[ei], input_tensor_flipped[ei], encoder_hidden_f, encoder_hidden_b)
         # append hidden forward and backward input_tensor_flipped[ei]
-
 
         encoder_hiddens_f[ei] = encoder_hidden_f
         encoder_hiddens_b[ei] = encoder_hidden_b
     
     e_vals = []
+    
 
     for di in range(len(target_tensor)):
         d_out, decoder_hidden, attention, e_vals = decoder(target_tensor[di], decoder_hidden, encoder_hiddens_f, encoder_hiddens_b,e_vals, c_idx=di)
@@ -379,12 +378,10 @@ def train(input_tensor, target_tensor, encoder, decoder, optimizer, criterion, m
         if target_tensor[di] == EOS_token:
             break
     
-    
     loss.backward()
     optimizer.step()
     
-
-    return loss.item() 
+    return loss.item()/len(target_tensor)
 
 ######################################################################
 
@@ -403,37 +400,52 @@ def translate(encoder, decoder, sentence, src_vocab, tgt_vocab, max_length=MAX_L
         encoder_hidden_f = encoder.get_initial_hidden_state()
         encoder_hidden_b = encoder.get_initial_hidden_state()
 
-        encoder_outputs = torch.zeros(max_length, encoder.hidden_size, device=device)
+        encoder_outputs_all_f = torch.zeros(max_length, 1, encoder.hidden_size, device=device)
+        encoder_outputs_all_b = torch.zeros(max_length, 1, encoder.hidden_size, device=device)
+        
         
         input_flipped = torch.flip(input_tensor, dims=[0,1])
         for ei in range(input_length):
             encoder_hidden_f, encoder_hidden_b = encoder(input_tensor[ei],input_flipped[ei],
                                                      encoder_hidden_f,
                                                      encoder_hidden_b)
-            
+            encoder_outputs_all_f[ei] = encoder_hidden_f
+            encoder_outputs_all_f[ei] = encoder_hidden_b
             # encoder_outputs[ei] += encoder_output[0, 0]
 
-        decoder_input = torch.tensor([[SOS_index]], device=device)
-
+        decoder_input = torch.tensor([SOS_index], device=device)
         decoder_hidden = decoder.get_initial_hidden_state()
 
         decoded_words = []
         decoder_attentions = torch.zeros(max_length, max_length)
         
         e_vals = []
+        
+        
         for di in range(max_length):
+            
             decoder_output, decoder_hidden, decoder_attention, e_vals = decoder(
-                decoder_input, decoder_hidden, encoder_outputs, e_vals)
-            decoder_attentions[di] = decoder_attention.data
+                decoder_input, decoder_hidden, encoder_outputs_all_f,
+                encoder_outputs_all_b, e_vals, di)
+            
+            decoder_attentions[di] = decoder_attention[:,0,0]
+            # print("dec:", decoder_output)
+            
+            # print(decoder_attetion[:,0,0])
+
             topv, topi = decoder_output.data.topk(1)
+            # print("topi", topi)
+
             if topi.item() == EOS_index:
                 decoded_words.append(EOS_token)
                 break
             else:
                 decoded_words.append(tgt_vocab.index2word[topi.item()])
-
-            decoder_input = topi.squeeze().detach()
-
+                # print("dw", decoded_words)
+                
+            decoder_input = topi.squeeze(1).detach()
+        # print("!!!!!!!!!!!!RETURNED!!!!!!!!!!!!!!!!!!!!!")
+        
         return decoded_words, decoder_attentions[:di + 1]
 
 
@@ -467,15 +479,23 @@ def translate_random_sentence(encoder, decoder, pairs, src_vocab, tgt_vocab, n=1
 
 ######################################################################
 
-def show_attention(input_sentence, output_words, attentions):
-    """visualize the attention mechanism. And save it to a file. 
-    Plots should look roughly like this: https://i.stack.imgur.com/PhtQi.png
-    You plots should include axis labels and a legend.
-    you may want to use matplotlib.
-    """
+def show_attention(src_sent, prediction, attention_vals):
     
-    "*** YOUR CODE HERE ***"
-    raise NotImplementedError
+    attentions = attention_vals.numpy()
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    cax = ax.matshow(attentions, cmap='spring')
+    fig.colorbar(cax)
+    
+    ax.set_xticklabels([''] + src_sent.split(" ") +
+                       ['<EOS>'], rotation=90)
+    ax.set_yticklabels([''] + prediction)
+
+    
+    ax.xaxis.set_major_locator(ticker.MultipleLocator(1))
+    ax.yaxis.set_major_locator(ticker.MultipleLocator(1))
+
+    plt.show()
 
 
 def translate_and_show_attention(input_sentence, encoder1, decoder1, src_vocab, tgt_vocab):
@@ -500,13 +520,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--hidden_size', default=256, type=int,
                     help='hidden size of encoder/decoder, also word vector size')
-    ap.add_argument('--n_iters', default=100000, type=int,
+    ap.add_argument('--n_iters', default=10000, type=int,
                     help='total number of examples to train on')
-    ap.add_argument('--print_every', default=10, type=int,
+    ap.add_argument('--print_every', default=25, type=int,
                     help='print loss info every this many training examples')
-    ap.add_argument('--checkpoint_every', default=10000, type=int,
+    ap.add_argument('--checkpoint_every', default=500, type=int,
                     help='write out checkpoint every this many training examples')
-    ap.add_argument('--initial_learning_rate', default=0.001, type=int,
+    ap.add_argument('--initial_learning_rate', default=0.01, type=int,
                     help='initial learning rate')
     ap.add_argument('--src_lang', default='fr',
                     help='Source (input) language code, e.g. "fr"')
